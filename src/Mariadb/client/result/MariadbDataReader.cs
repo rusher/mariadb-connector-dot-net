@@ -13,36 +13,35 @@ namespace Mariadb.client.result;
 
 public class MariadbDataReader : DbDataReader, ICompletion
 {
-    
-    private static BinaryRowDecoder BINARY_ROW_DECODER = new BinaryRowDecoder();
-    private static TextRowDecoder TEXT_ROW_DECODER = new TextRowDecoder();
+    private static readonly BinaryRowDecoder BINARY_ROW_DECODER = new();
+    private static readonly TextRowDecoder TEXT_ROW_DECODER = new();
     public static int NULL_LENGTH = -1;
-
-    private int _maxIndex;
+    protected bool _closed;
     private bool _closeOnCompletion;
-    private bool _forceAlias;
-    private bool _traceEnable;
-
-    protected int _resultSetType;
+    protected IContext _context;
+    protected byte[][] _data;
+    protected int _dataSize;
     protected ExceptionFactory _exceptionFactory;
+    protected MutableInt _fieldIndex = new();
+    private int _fieldLength;
+    private bool _forceAlias;
+    protected bool _loaded;
+    private Dictionary<string, int> _mapper;
+
+    private readonly int _maxIndex;
+    protected IColumnDecoder[] _metaDataList;
+    private readonly byte[] _nullBitmap;
+    protected bool _outputParameter;
 
     protected IReader _reader;
-    protected IContext _context;
-    protected IColumnDecoder[] _metaDataList;
+
+    protected int _resultSetType;
+    protected StandardReadableByteBuf _rowBuf = new(null, 0);
     protected IRowDecoder _rowDecoder;
-    protected int _dataSize = 0;
-    protected byte[][] _data;
-    private byte[] _nullBitmap;
-    protected StandardReadableByteBuf _rowBuf = new StandardReadableByteBuf(null, 0);
-    private int _fieldLength;
-    protected MutableInt _fieldIndex = new MutableInt();
-    private Dictionary<String, int> _mapper = null;
-    protected bool _loaded;
-    protected bool _outputParameter;
     protected int _rowPointer = -1;
-    protected bool _closed;
     protected DbCommand _statement;
-    
+    private readonly bool _traceEnable;
+
     public MariadbDataReader(
         DbCommand stmt,
         bool binaryProtocol,
@@ -62,47 +61,71 @@ public class MariadbDataReader : DbDataReader, ICompletion
         _context = context;
         _resultSetType = resultSetType;
         _traceEnable = traceEnable;
-        if (binaryProtocol) {
+        if (binaryProtocol)
+        {
             _rowDecoder = BINARY_ROW_DECODER;
             _nullBitmap = new byte[(_maxIndex + 9) / 8];
-        } else {
+        }
+        else
+        {
             _rowDecoder = TEXT_ROW_DECODER;
         }
-        
+
         _data = new byte[10][];
-        while (ReadNext()) {}
+        while (ReadNext())
+        {
+        }
+
         _loaded = true;
     }
 
+    public override int Depth { get; }
+    public override int FieldCount { get; }
+    public override bool HasRows { get; }
+    public override bool IsClosed { get; }
 
-    private bool ReadNext() {
-        byte[] buf = _reader.ReadPacket(_traceEnable);
-        switch (buf[0]) {
-            case (byte) 0xFF:
+    public override object this[int ordinal] => throw new NotImplementedException();
+
+    public override object this[string name] => throw new NotImplementedException();
+
+    public override int RecordsAffected { get; }
+
+
+    private bool ReadNext()
+    {
+        var buf = _reader.ReadPacket(_traceEnable);
+        switch (buf[0])
+        {
+            case 0xFF:
                 _loaded = true;
-                ErrorPacket errorPacket = new ErrorPacket(_reader.ReadableBufFromArray(buf), _context);
+                var errorPacket = new ErrorPacket(_reader.ReadableBufFromArray(buf), _context);
                 throw _exceptionFactory.create(
                     errorPacket.Message, errorPacket.SqlState, errorPacket.ErrorCode);
 
-            case (byte) 0xFE:
+            case 0xFE:
                 if ((_context.isEofDeprecated() && buf.Length < 16777215)
-                    || (!_context.isEofDeprecated() && buf.Length < 8)) {
-                    IReadableByteBuf readBuf = _reader.ReadableBufFromArray(buf);
+                    || (!_context.isEofDeprecated() && buf.Length < 8))
+                {
+                    var readBuf = _reader.ReadableBufFromArray(buf);
                     readBuf.Skip(); // skip header
                     int serverStatus;
                     int warnings;
 
-                    if (!_context.isEofDeprecated()) {
+                    if (!_context.isEofDeprecated())
+                    {
                         // EOF_Packet
                         warnings = readBuf.ReadUnsignedShort();
                         serverStatus = readBuf.ReadUnsignedShort();
-                    } else {
+                    }
+                    else
+                    {
                         // OK_Packet with a 0xFE header
                         readBuf.ReadLongLengthEncodedNotNull(); // skip update count
                         readBuf.ReadLongLengthEncodedNotNull(); // skip insert id
                         serverStatus = readBuf.ReadUnsignedShort();
                         warnings = readBuf.ReadUnsignedShort();
                     }
+
                     _outputParameter = (serverStatus & ServerStatus.PS_OUT_PARAMETERS) != 0;
                     _context.setServerStatus(serverStatus);
                     _context.setWarning(warnings);
@@ -111,71 +134,73 @@ public class MariadbDataReader : DbDataReader, ICompletion
                 }
 
                 // continue reading rows
-                if (_dataSize + 1 > _data.Length) {
-                    Grow_dataArray();
-                }
+                if (_dataSize + 1 > _data.Length) Grow_dataArray();
                 _data[_dataSize++] = buf;
                 break;
-            
+
             default:
-                if (_dataSize + 1 > _data.Length) {
-                    Grow_dataArray();
-                }
+                if (_dataSize + 1 > _data.Length) Grow_dataArray();
                 _data[_dataSize++] = buf;
                 break;
         }
+
         return true;
     }
-    
-    private void Grow_dataArray() {
-        int newCapacity = _data.Length + (_data.Length >> 1);
-        byte[][] new_data = new byte[newCapacity][];
+
+    private void Grow_dataArray()
+    {
+        var newCapacity = _data.Length + (_data.Length >> 1);
+        var new_data = new byte[newCapacity][];
         Array.Copy(_data, 0, new_data, 0, _data.Length);
         _data = new_data;
     }
-    
-    private void SetRow(byte[] row) {
+
+    private void SetRow(byte[] row)
+    {
         _rowBuf.Buf(row, row.Length, 0);
         _fieldIndex.Value = -1;
     }
-    
-    private void SetNull_rowBuf() {
+
+    private void SetNull_rowBuf()
+    {
         _rowBuf.Buf(null, 0, 0);
     }
-    private void CheckIndex(int index) {
-        if (index < 0 || index >= _maxIndex) {
-            throw new ArgumentOutOfRangeException($"Wrong index position. Is {index} but must be in 1-{_maxIndex} range");
-        }
-        if (_rowBuf.Buf() == null) {
-            throw new InvalidOperationException("wrong row position");
-        }
+
+    private void CheckIndex(int index)
+    {
+        if (index < 0 || index >= _maxIndex)
+            throw new ArgumentOutOfRangeException(
+                $"Wrong index position. Is {index} but must be in 1-{_maxIndex} range");
+        if (_rowBuf.Buf() == null) throw new InvalidOperationException("wrong row position");
     }
-    
-    private int FindColumn(string label) {
+
+    private int FindColumn(string label)
+    {
         if (label == null) throw new ArgumentException("null is not a valid label value");
-        if (_mapper == null) {
-            _mapper = new Dictionary<String, int>();
-            for (int i = 0; i < _maxIndex; i++) {
-                IColumnDecoder ci = _metaDataList[i];
-                String columnAlias = ci.GetColumnAlias();
-                if (columnAlias != null) {
+        if (_mapper == null)
+        {
+            _mapper = new Dictionary<string, int>();
+            for (var i = 0; i < _maxIndex; i++)
+            {
+                var ci = _metaDataList[i];
+                var columnAlias = ci.GetColumnAlias();
+                if (columnAlias != null)
+                {
                     columnAlias = columnAlias.ToLower();
                     _mapper.Add(columnAlias, i);
-                    String tableAlias = ci.GetTableAlias();
-                    String tableLabel = tableAlias != null ? tableAlias : ci.GetTable();
+                    var tableAlias = ci.GetTableAlias();
+                    var tableLabel = tableAlias != null ? tableAlias : ci.GetTable();
                     _mapper.Add(tableLabel.ToLower() + "." + columnAlias, i);
                 }
             }
         }
 
         int ind;
-        if (_mapper.TryGetValue(label.ToLower(), out ind))
-        {
-            return ind;
-        }
-        throw new ArgumentException($"Unknown label '{label}'. Possible value {string.Join(",", _mapper.Keys.ToList())}");
+        if (_mapper.TryGetValue(label.ToLower(), out ind)) return ind;
+        throw new ArgumentException(
+            $"Unknown label '{label}'. Possible value {string.Join(",", _mapper.Keys.ToList())}");
     }
-    
+
     public override bool GetBoolean(int ordinal)
     {
         throw new NotImplementedException();
@@ -272,9 +297,7 @@ public class MariadbDataReader : DbDataReader, ICompletion
         _fieldLength =
             _rowDecoder.SetPosition(
                 ordinal, _fieldIndex, _maxIndex, _rowBuf, _nullBitmap, _metaDataList);
-        if (_fieldLength == NULL_LENGTH) {
-            return null;
-        }
+        if (_fieldLength == NULL_LENGTH) return null;
         return _rowDecoder.DecodeString(_metaDataList, _fieldIndex, _rowBuf, _fieldLength);
     }
 
@@ -300,25 +323,15 @@ public class MariadbDataReader : DbDataReader, ICompletion
 
     public override bool Read()
     {
-        if (_rowPointer < _dataSize - 1) {
+        if (_rowPointer < _dataSize - 1)
+        {
             SetRow(_data[++_rowPointer]);
             return true;
-        } else {
-            // all _data are reads and pointer is after last
-            SetNull_rowBuf();
-            _rowPointer = _dataSize;
-            return false;
         }
+
+        // all _data are reads and pointer is after last
+        SetNull_rowBuf();
+        _rowPointer = _dataSize;
+        return false;
     }
-
-    public override int Depth { get; }
-    public override int FieldCount { get; }
-    public override bool HasRows { get; }
-    public override bool IsClosed { get; }
-
-    public override object this[int ordinal] => throw new NotImplementedException();
-
-    public override object this[string name] => throw new NotImplementedException();
-
-    public override int RecordsAffected { get; }
 }

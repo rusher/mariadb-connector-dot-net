@@ -5,285 +5,292 @@ using Mariadb.utils.log;
 
 namespace Mariadb.client.socket;
 
-public class PacketReader: IReader
+public class PacketReader : IReader
 {
-    
-  private IReadableByteBuf readBuf = new StandardReadableByteBuf(null, 0);
-  private static Ilogger logger = Loggers.getLogger("PacketReader");
+    private const int REUSABLE_BUFFER_LENGTH = 1024;
+    private const int MAX_PACKET_SIZE = 0xffffff;
+    private static readonly Ilogger logger = Loggers.getLogger("PacketReader");
+    private readonly NetworkStream _in;
+    private readonly uint _maxQuerySizeToLog;
 
+    private readonly MutableByte _sequence;
+    private string _serverThreadLog = "";
 
-  private const int REUSABLE_BUFFER_LENGTH = 1024;
-  private const int MAX_PACKET_SIZE = 0xffffff;
+    private readonly byte[] header = new byte[4];
 
-  private byte[] header = new byte[4];
-  private byte[] reusableArray = new byte[REUSABLE_BUFFER_LENGTH];
-  private readonly NetworkStream _in;
-  private readonly uint _maxQuerySizeToLog;
+    private readonly IReadableByteBuf readBuf = new StandardReadableByteBuf(null, 0);
+    private readonly byte[] reusableArray = new byte[REUSABLE_BUFFER_LENGTH];
 
-  private MutableByte _sequence;
-  private string _serverThreadLog = "";
-
-  public PacketReader(NetworkStream networkStream, Configuration conf, MutableByte sequence) {
-    _in = networkStream;
-    _maxQuerySizeToLog = conf.MaxQuerySizeToLog;
-    _sequence = sequence;
-  }
-
-  public IReadableByteBuf ReadableBufFromArray(byte[] buf) {
-    readBuf.Buf(buf, buf.Length, 0);
-    return readBuf;
-  }
-
-  public IReadableByteBuf ReadReusablePacket() {
-    return ReadReusablePacket(logger.isTraceEnabled());
-  }
-
-  public IReadableByteBuf ReadReusablePacket(bool traceEnable) {
-    // ***************************************************
-    // Read 4 byte header
-    // ***************************************************
-    int remaining = 4;
-    int off = 0;
-    do {
-      int count = _in.Read(header, off, remaining);
-      if (count < 0) {
-        throw new IOException(
-            "unexpected end of stream, read "
-                + off
-                + " bytes from 4 (socket was closed by server)");
-      }
-      remaining -= count;
-      off += count;
-    } while (remaining > 0);
-
-    int lastPacketLength =
-        (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
-    _sequence.Value = header[3];
-
-    // prepare array
-    byte[] rawBytes;
-    if (lastPacketLength < REUSABLE_BUFFER_LENGTH) {
-      rawBytes = reusableArray;
-    } else {
-      rawBytes = new byte[lastPacketLength];
+    public PacketReader(NetworkStream networkStream, Configuration conf, MutableByte sequence)
+    {
+        _in = networkStream;
+        _maxQuerySizeToLog = conf.MaxQuerySizeToLog;
+        _sequence = sequence;
     }
 
-    // ***************************************************
-    // Read content
-    // ***************************************************
-    remaining = lastPacketLength;
-    off = 0;
-    do {
-      int count = _in.Read(rawBytes, off, remaining);
-      if (count < 0) {
-        throw new IOException(
-            "unexpected end of stream, read "
-                + (lastPacketLength - remaining)
-                + " bytes from "
-                + lastPacketLength
-                + " (socket was closed by server)");
-      }
-      remaining -= count;
-      off += count;
-    } while (remaining > 0);
-
-    if (traceEnable) {
-      logger.trace(
-          $"read: {_serverThreadLog}\n{LoggerHelper.Hex(header, rawBytes, 0, lastPacketLength, _maxQuerySizeToLog)}");
+    public IReadableByteBuf ReadableBufFromArray(byte[] buf)
+    {
+        readBuf.Buf(buf, buf.Length, 0);
+        return readBuf;
     }
 
-    readBuf.Buf(rawBytes, lastPacketLength, 0);
-    return readBuf;
-  }
-
-  public byte[] ReadPacket(bool traceEnable) {
-    // ***************************************************
-    // Read 4 byte header
-    // ***************************************************
-    int remaining = 4;
-    int off = 0;
-    do {
-      int count = _in.Read(header, off, remaining);
-      if (count < 0) {
-        throw new IOException(
-            "unexpected end of stream, read "
-                + off
-                + " bytes from 4 (socket was closed by server)");
-      }
-      remaining -= count;
-      off += count;
-    } while (remaining > 0);
-
-    int lastPacketLength =
-        (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
-
-    // prepare array
-    byte[] rawBytes = new byte[lastPacketLength];
-
-    // ***************************************************
-    // Read content
-    // ***************************************************
-    remaining = lastPacketLength;
-    off = 0;
-    do {
-      int count = _in.Read(rawBytes, off, remaining);
-      if (count < 0) {
-        throw new IOException(
-            "unexpected end of stream, read "
-                + (lastPacketLength - remaining)
-                + " bytes from "
-                + lastPacketLength
-                + " (socket was closed by server)");
-      }
-      remaining -= count;
-      off += count;
-    } while (remaining > 0);
-
-    if (traceEnable) {
-      logger.trace($"read: {_serverThreadLog}\n{LoggerHelper.Hex(header, rawBytes, 0, lastPacketLength, _maxQuerySizeToLog)}");
+    public IReadableByteBuf ReadReusablePacket()
+    {
+        return ReadReusablePacket(logger.isTraceEnabled());
     }
 
-    // ***************************************************
-    // In case content length is big, content will be separate in many 16Mb packets
-    // ***************************************************
-    if (lastPacketLength == MAX_PACKET_SIZE) {
-      int packetLength;
-      do {
-        remaining = 4;
-        off = 0;
-        do {
-          int count = _in.Read(header, off, remaining);
-          if (count < 0) {
-            throw new IOException("unexpected end of stream, read " + off + " bytes from 4");
-          }
-          remaining -= count;
-          off += count;
+    public IReadableByteBuf ReadReusablePacket(bool traceEnable)
+    {
+        // ***************************************************
+        // Read 4 byte header
+        // ***************************************************
+        var remaining = 4;
+        var off = 0;
+        do
+        {
+            var count = _in.Read(header, off, remaining);
+            if (count < 0)
+                throw new IOException(
+                    "unexpected end of stream, read "
+                    + off
+                    + " bytes from 4 (socket was closed by server)");
+            remaining -= count;
+            off += count;
         } while (remaining > 0);
 
-        packetLength = (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
+        var lastPacketLength =
+            (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
+        _sequence.Value = header[3];
 
-        int currentbufLength = rawBytes.Length;
-        byte[] newRawBytes = new byte[currentbufLength + packetLength];
-        Array.Copy(rawBytes, 0, newRawBytes, 0, currentbufLength);
-        rawBytes = newRawBytes;
+        // prepare array
+        byte[] rawBytes;
+        if (lastPacketLength < REUSABLE_BUFFER_LENGTH)
+            rawBytes = reusableArray;
+        else
+            rawBytes = new byte[lastPacketLength];
 
         // ***************************************************
         // Read content
         // ***************************************************
-        remaining = packetLength;
-        off = currentbufLength;
-        do {
-          int count = _in.Read(rawBytes, off, remaining);
-          if (count < 0) {
-            throw new IOException(
-                "unexpected end of stream, read "
-                    + (packetLength - remaining)
+        remaining = lastPacketLength;
+        off = 0;
+        do
+        {
+            var count = _in.Read(rawBytes, off, remaining);
+            if (count < 0)
+                throw new IOException(
+                    "unexpected end of stream, read "
+                    + (lastPacketLength - remaining)
                     + " bytes from "
-                    + packetLength);
-          }
-          remaining -= count;
-          off += count;
+                    + lastPacketLength
+                    + " (socket was closed by server)");
+            remaining -= count;
+            off += count;
         } while (remaining > 0);
 
-        if (traceEnable) {
-          logger.trace(
-              $"read: {_serverThreadLog}\n{LoggerHelper.Hex(header, rawBytes, currentbufLength, packetLength, _maxQuerySizeToLog)}");
+        if (traceEnable)
+            logger.trace(
+                $"read: {_serverThreadLog}\n{LoggerHelper.Hex(header, rawBytes, 0, lastPacketLength, _maxQuerySizeToLog)}");
+
+        readBuf.Buf(rawBytes, lastPacketLength, 0);
+        return readBuf;
+    }
+
+    public byte[] ReadPacket(bool traceEnable)
+    {
+        // ***************************************************
+        // Read 4 byte header
+        // ***************************************************
+        var remaining = 4;
+        var off = 0;
+        do
+        {
+            var count = _in.Read(header, off, remaining);
+            if (count < 0)
+                throw new IOException(
+                    "unexpected end of stream, read "
+                    + off
+                    + " bytes from 4 (socket was closed by server)");
+            remaining -= count;
+            off += count;
+        } while (remaining > 0);
+
+        var lastPacketLength =
+            (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
+
+        // prepare array
+        var rawBytes = new byte[lastPacketLength];
+
+        // ***************************************************
+        // Read content
+        // ***************************************************
+        remaining = lastPacketLength;
+        off = 0;
+        do
+        {
+            var count = _in.Read(rawBytes, off, remaining);
+            if (count < 0)
+                throw new IOException(
+                    "unexpected end of stream, read "
+                    + (lastPacketLength - remaining)
+                    + " bytes from "
+                    + lastPacketLength
+                    + " (socket was closed by server)");
+            remaining -= count;
+            off += count;
+        } while (remaining > 0);
+
+        if (traceEnable)
+            logger.trace(
+                $"read: {_serverThreadLog}\n{LoggerHelper.Hex(header, rawBytes, 0, lastPacketLength, _maxQuerySizeToLog)}");
+
+        // ***************************************************
+        // In case content length is big, content will be separate in many 16Mb packets
+        // ***************************************************
+        if (lastPacketLength == MAX_PACKET_SIZE)
+        {
+            int packetLength;
+            do
+            {
+                remaining = 4;
+                off = 0;
+                do
+                {
+                    var count = _in.Read(header, off, remaining);
+                    if (count < 0) throw new IOException("unexpected end of stream, read " + off + " bytes from 4");
+                    remaining -= count;
+                    off += count;
+                } while (remaining > 0);
+
+                packetLength = (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
+
+                var currentbufLength = rawBytes.Length;
+                var newRawBytes = new byte[currentbufLength + packetLength];
+                Array.Copy(rawBytes, 0, newRawBytes, 0, currentbufLength);
+                rawBytes = newRawBytes;
+
+                // ***************************************************
+                // Read content
+                // ***************************************************
+                remaining = packetLength;
+                off = currentbufLength;
+                do
+                {
+                    var count = _in.Read(rawBytes, off, remaining);
+                    if (count < 0)
+                        throw new IOException(
+                            "unexpected end of stream, read "
+                            + (packetLength - remaining)
+                            + " bytes from "
+                            + packetLength);
+                    remaining -= count;
+                    off += count;
+                } while (remaining > 0);
+
+                if (traceEnable)
+                    logger.trace(
+                        $"read: {_serverThreadLog}\n{LoggerHelper.Hex(header, rawBytes, currentbufLength, packetLength, _maxQuerySizeToLog)}");
+
+                lastPacketLength += packetLength;
+            } while (packetLength == MAX_PACKET_SIZE);
         }
 
-        lastPacketLength += packetLength;
-      } while (packetLength == MAX_PACKET_SIZE);
+        return rawBytes;
     }
 
-    return rawBytes;
-  }
+    public void SkipPacket()
+    {
+        if (logger.isTraceEnabled())
+        {
+            ReadReusablePacket(logger.isTraceEnabled());
+            return;
+        }
 
-  public void SkipPacket() {
-    if (logger.isTraceEnabled()) {
-      ReadReusablePacket(logger.isTraceEnabled());
-      return;
-    }
-
-    // ***************************************************
-    // Read 4 byte header
-    // ***************************************************
-    int remaining = 4;
-    int off = 0;
-    do {
-      int count = _in.Read(header, off, remaining);
-      if (count < 0) {
-        throw new IOException(
-            "unexpected end of stream, read "
-                + off
-                + " bytes from 4 (socket was closed by server)");
-      }
-      remaining -= count;
-      off += count;
-    } while (remaining > 0);
-
-    int lastPacketLength =
-        (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
-
-    remaining = lastPacketLength;
-    // skipping 
-    do {
-      int count = _in.Read(header, 0, Math.Min(4, remaining));
-      if (count < 0) {
-        throw new IOException(
-          "unexpected end of stream, skipping bytes (socket was closed by server)");
-      }
-      remaining -= count;
-      off += count;
-    } while (remaining > 0);
-
-    // ***************************************************
-    // In case content length is big, content will be separate in many 16Mb packets
-    // ***************************************************
-    if (lastPacketLength == MAX_PACKET_SIZE) {
-      int packetLength;
-      do {
-        remaining = 4;
-        off = 0;
-        do {
-          int count = _in.Read(header, off, remaining);
-          if (count < 0) {
-            throw new IOException("unexpected end of stream, read " + off + " bytes from 4");
-          }
-          remaining -= count;
-          off += count;
+        // ***************************************************
+        // Read 4 byte header
+        // ***************************************************
+        var remaining = 4;
+        var off = 0;
+        do
+        {
+            var count = _in.Read(header, off, remaining);
+            if (count < 0)
+                throw new IOException(
+                    "unexpected end of stream, read "
+                    + off
+                    + " bytes from 4 (socket was closed by server)");
+            remaining -= count;
+            off += count;
         } while (remaining > 0);
 
-        packetLength = (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
+        var lastPacketLength =
+            (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
 
-        remaining = packetLength;
+        remaining = lastPacketLength;
         // skipping 
-        do {
-          int count = _in.Read(header, 0, Math.Min(4, remaining));
-          if (count < 0) {
-            throw new IOException(
-              "unexpected end of stream, skipping bytes (socket was closed by server)");
-          }
-          remaining -= count;
-          off += count;
+        do
+        {
+            var count = _in.Read(header, 0, Math.Min(4, remaining));
+            if (count < 0)
+                throw new IOException(
+                    "unexpected end of stream, skipping bytes (socket was closed by server)");
+            remaining -= count;
+            off += count;
         } while (remaining > 0);
 
-        lastPacketLength += packetLength;
-      } while (packetLength == MAX_PACKET_SIZE);
+        // ***************************************************
+        // In case content length is big, content will be separate in many 16Mb packets
+        // ***************************************************
+        if (lastPacketLength == MAX_PACKET_SIZE)
+        {
+            int packetLength;
+            do
+            {
+                remaining = 4;
+                off = 0;
+                do
+                {
+                    var count = _in.Read(header, off, remaining);
+                    if (count < 0) throw new IOException("unexpected end of stream, read " + off + " bytes from 4");
+                    remaining -= count;
+                    off += count;
+                } while (remaining > 0);
+
+                packetLength = (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
+
+                remaining = packetLength;
+                // skipping 
+                do
+                {
+                    var count = _in.Read(header, 0, Math.Min(4, remaining));
+                    if (count < 0)
+                        throw new IOException(
+                            "unexpected end of stream, skipping bytes (socket was closed by server)");
+                    remaining -= count;
+                    off += count;
+                } while (remaining > 0);
+
+                lastPacketLength += packetLength;
+            } while (packetLength == MAX_PACKET_SIZE);
+        }
     }
-  }
 
-  public MutableByte GetSequence() {
-    return _sequence;
-  }
+    public MutableByte GetSequence()
+    {
+        return _sequence;
+    }
 
-  public void Close() {
-    _in.Close();
-  }
+    public void Close()
+    {
+        _in.Close();
+    }
 
-  public void SetServerThreadId(long serverThreadId, HostAddress hostAddress) {
-    bool? isMaster = hostAddress?.Primary;
-    _serverThreadLog =
-        "conn="
+    public void SetServerThreadId(long serverThreadId, HostAddress hostAddress)
+    {
+        var isMaster = hostAddress?.Primary;
+        _serverThreadLog =
+            "conn="
             + (serverThreadId == null ? "-1" : serverThreadId)
-            + ((isMaster != null) ? " (" + (isMaster.Value ? "M" : "S") + ")" : "");
-  }
+            + (isMaster != null ? " (" + (isMaster.Value ? "M" : "S") + ")" : "");
+    }
 }

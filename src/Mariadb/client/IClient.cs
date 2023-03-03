@@ -6,56 +6,57 @@ namespace Mariadb.client;
 
 public interface IClient
 {
-    
-  List<ICompletion> execute(IClientMessage message, bool canRedo);
+    List<ICompletion> execute(IClientMessage message, bool canRedo);
 
-  List<ICompletion> execute(IClientMessage message, DbCommand stmt, bool canRedo);
+    List<ICompletion> execute(IClientMessage message, DbCommand stmt, bool canRedo);
 
-  List<ICompletion> execute(
-      IClientMessage message,
-      DbCommand stmt,
-      int fetchSize,
-      long maxRows,
-      int resultSetType,
-      bool closeOnCompletion,
-      bool canRedo);
+    List<ICompletion> execute(
+        IClientMessage message,
+        DbCommand stmt,
+        int fetchSize,
+        long maxRows,
+        int resultSetType,
+        bool closeOnCompletion,
+        bool canRedo);
 
-  List<ICompletion> executePipeline(
-      IClientMessage[] messages,
-      DbCommand stmt,
-      int fetchSize,
-      long maxRows,
-      int resultSetType,
-      bool closeOnCompletion,
-      bool canRedo);
+    List<ICompletion> executePipeline(
+        IClientMessage[] messages,
+        DbCommand stmt,
+        int fetchSize,
+        long maxRows,
+        int resultSetType,
+        bool closeOnCompletion,
+        bool canRedo);
 
-  void readStreamingResults(
-      List<ICompletion> completions,
-      int fetchSize,
-      long maxRows,
-      int resultSetType,
-      bool closeOnCompletion);
+    void readStreamingResults(
+        List<ICompletion> completions,
+        int fetchSize,
+        long maxRows,
+        int resultSetType,
+        bool closeOnCompletion);
 
-  //void closePrepare(Prepare prepare);
+    //void closePrepare(Prepare prepare);
 
-  void close();
+    void close();
 
-  void setReadOnly(bool readOnly);
+    void setReadOnly(bool readOnly);
 
-  int getSocketTimeout();
+    int getSocketTimeout();
 
-  void setSocketTimeout(int milliseconds);
+    void setSocketTimeout(int milliseconds);
 
-  bool isClosed();
+    bool isClosed();
 
-  /** Reset connection */
-  void reset();
+    /**
+     * Reset connection
+     */
+    void reset();
 
-  bool isPrimary();
+    bool isPrimary();
 
-  IContext getContext();
+    IContext getContext();
 
-  ExceptionFactory getExceptionFactory();
+    ExceptionFactory getExceptionFactory();
 
-  HostAddress getHostAddress();
+    HostAddress getHostAddress();
 }

@@ -7,30 +7,28 @@ namespace Mariadb.plugin;
 
 public interface ICodec<T>
 {
-    
-  string ClassName();
-  bool CanDecode(IColumnDecoder column, Type type);
+    string ClassName();
+    bool CanDecode(IColumnDecoder column, Type type);
 
-  bool CanEncode(Object value);
+    bool CanEncode(object value);
 
-  T DecodeText(
-      IReadableByteBuf buffer,
-      int length,
-      IColumnDecoder column);
+    T DecodeText(
+        IReadableByteBuf buffer,
+        int length,
+        IColumnDecoder column);
 
-  T DecodeBinary(
-      IReadableByteBuf buffer,
-      int length,
-      IColumnDecoder column);
+    T DecodeBinary(
+        IReadableByteBuf buffer,
+        int length,
+        IColumnDecoder column);
 
-  void EncodeText(IWriter encoder, IContext context, Object value, long? length);
+    void EncodeText(IWriter encoder, IContext context, object value, long? length);
 
-  void EncodeBinary(IWriter encoder, Object value, long? length);
+    void EncodeBinary(IWriter encoder, object value, long? length);
 
-  bool CanEncodeLongData();
+    bool CanEncodeLongData();
 
-  void EncodeLongData(IWriter encoder, T value, long? length);
-  byte[] EncodeData(T value, long? length);
-  int GetBinaryEncodeType();
-
+    void EncodeLongData(IWriter encoder, T value, long? length);
+    byte[] EncodeData(T value, long? length);
+    int GetBinaryEncodeType();
 }

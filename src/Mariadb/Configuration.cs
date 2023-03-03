@@ -4,21 +4,19 @@ namespace Mariadb;
 
 public class Configuration
 {
+    public readonly bool AllowLoadLocalInfile;
     public readonly string Database;
+    public readonly bool DumpQueriesOnException;
+    public readonly uint MaxQuerySizeToLog;
     public readonly string Password;
     public readonly uint Port;
 
     public readonly string Server;
     public readonly string User;
 
-
-    public readonly bool AllowLoadLocalInfile;
-    public readonly bool DumpQueriesOnException;
-    public readonly uint MaxQuerySizeToLog;
-    
     public Configuration(DbConnectionStringBuilder builder)
     {
-        Parser parser = new Parser(builder);
+        var parser = new Parser(builder);
         Server = parser.getStringOption(
             new[] { "Server", "Host", "Data Source", "DataSource", "Address", "Addr", "Network Address" },
             "localhost");
@@ -30,16 +28,16 @@ public class Configuration
         Database = parser.getStringOption(
             new[] { "Database", "Initial Catalog" }, null);
         DumpQueriesOnException = parser.getBoolOption(
-            new[] { "DumpQueriesOnException"}, false);
+            new[] { "DumpQueriesOnException" }, false);
         MaxQuerySizeToLog = parser.getIntOption(new[] { "MaxQuerySizeToLog" }, 1024);
         AllowLoadLocalInfile = parser.getBoolOption(
-                new[] { "AllowLoadLocalInfile", "Allow Load Local Infile"}, false);
+            new[] { "AllowLoadLocalInfile", "Allow Load Local Infile" }, false);
     }
 }
 
 internal class Parser
 {
-    private DbConnectionStringBuilder _builder;
+    private readonly DbConnectionStringBuilder _builder;
 
     public Parser(DbConnectionStringBuilder builder)
     {
@@ -67,9 +65,8 @@ internal class Parser
             if (obj is uint ui) return ui;
             if (obj is int i) return (uint)i;
             if (obj is string str)
-            {
-                if (UInt32.TryParse(str, out uint parseRes)) return parseRes;
-            }
+                if (uint.TryParse(str, out var parseRes))
+                    return parseRes;
 
             throw new ArgumentException($"Parameter {k} has wrong int32 value '{obj}'.");
         }
@@ -85,9 +82,8 @@ internal class Parser
             if (obj == null) continue;
             if (obj is bool b) return b;
             if (obj is string str)
-            {
-                if (bool.TryParse(str, out bool parseRes)) return parseRes;
-            }
+                if (bool.TryParse(str, out var parseRes))
+                    return parseRes;
 
             throw new ArgumentException($"Parameter {k} has wrong boolean value '{obj}'.");
         }

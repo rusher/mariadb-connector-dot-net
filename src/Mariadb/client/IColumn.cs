@@ -18,5 +18,4 @@ public interface IColumn
     bool IsBinary();
     int GetFlags();
     string? GetExtTypeName();
-
 }

@@ -2,8 +2,8 @@ namespace Mariadb;
 
 public enum HaMode
 {
-  REPLICATION,
-  SEQUENTIAL,
-  LOADBALANCE,
-  NONE
+    REPLICATION,
+    SEQUENTIAL,
+    LOADBALANCE,
+    NONE
 }

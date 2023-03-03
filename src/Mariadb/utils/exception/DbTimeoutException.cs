@@ -2,11 +2,19 @@ namespace Mariadb.utils.exception;
 
 public class DbTimeoutException : DbTransientConnectionException
 {
-    public DbTimeoutException() : base() { }
+    public DbTimeoutException()
+    {
+    }
 
-    public DbTimeoutException(string? message) : base(message) { }
+    public DbTimeoutException(string? message) : base(message)
+    {
+    }
 
-    public DbTimeoutException(string? message, System.Exception? innerException) : base(message, innerException) { }
-    
-    public DbTimeoutException(string? message, int errorCode, string sqlState) : base(message, errorCode, sqlState) { }
+    public DbTimeoutException(string? message, Exception? innerException) : base(message, innerException)
+    {
+    }
+
+    public DbTimeoutException(string? message, int errorCode, string sqlState) : base(message, errorCode, sqlState)
+    {
+    }
 }

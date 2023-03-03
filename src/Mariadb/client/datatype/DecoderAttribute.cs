@@ -6,8 +6,8 @@ namespace Mariadb.client;
 public class DecoderAttribute : Attribute
 {
     public DecoderAttribute(
-        Func<IReadableByteBuf,int,long,DataType ,byte,int,int[] ,string ,string , IColumnDecoder> signedDecoder, 
-        Func<IReadableByteBuf,int,long,DataType ,byte,int,int[] ,string ,string , IColumnDecoder> unsignedDecoder)
+        Func<IReadableByteBuf, int, long, DataType, byte, int, int[], string, string, IColumnDecoder> signedDecoder,
+        Func<IReadableByteBuf, int, long, DataType, byte, int, int[], string, string, IColumnDecoder> unsignedDecoder)
     {
     }
 }

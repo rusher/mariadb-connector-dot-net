@@ -4,64 +4,67 @@ namespace Mariadb.client;
 
 public interface IContext
 {
-    
-  long getThreadId();
+    long getThreadId();
 
-  byte[] getSeed();
+    byte[] getSeed();
 
-  bool hasServerCapability(long flag);
+    bool hasServerCapability(long flag);
 
-  bool hasClientCapability(long flag);
+    bool hasClientCapability(long flag);
 
-  bool permitPipeline();
+    bool permitPipeline();
 
-  int getServerStatus();
+    int getServerStatus();
 
-  void setServerStatus(int serverStatus);
+    void setServerStatus(int serverStatus);
 
-  String getDatabase();
+    string getDatabase();
 
-  void setDatabase(String database);
+    void setDatabase(string database);
 
-  IServerVersion getVersion();
+    IServerVersion getVersion();
 
-  bool isEofDeprecated();
+    bool isEofDeprecated();
 
-  bool canSkipMeta();
+    bool canSkipMeta();
 
-  bool isExtendedInfo();
+    bool isExtendedInfo();
 
-  int getWarning();
+    int getWarning();
 
-  void setWarning(int warning);
+    void setWarning(int warning);
 
-  ExceptionFactory getExceptionFactory();
+    ExceptionFactory getExceptionFactory();
 
-  Configuration getConf();
+    Configuration getConf();
 
-  int getTransactionIsolationLevel();
+    int getTransactionIsolationLevel();
 
-  void setTransactionIsolationLevel(int transactionIsolationLevel);
+    void setTransactionIsolationLevel(int transactionIsolationLevel);
 
-  //PrepareCache getPrepareCache();
+    //PrepareCache getPrepareCache();
 
-  /** Reset prepare cache (after a failover) */
-  void resetPrepareCache();
+    /**
+     * Reset prepare cache (after a failover)
+     */
+    void resetPrepareCache();
 
-  /**
+    /**
    * return connection current state change flag
    *
    * @return connection current state change flag
    */
-  int getStateFlag();
+    int getStateFlag();
 
-  /** reset connection state change flag */
-  void resetStateFlag();
+    /**
+     * reset connection state change flag
+     */
+    void resetStateFlag();
 
-  /**
+    /**
    * Indicate connection state (for pooling)
    *
    * @param state indicate that some connection state has changed
    */
-  void addStateFlag(int state);
+    void addStateFlag(int state);
 }

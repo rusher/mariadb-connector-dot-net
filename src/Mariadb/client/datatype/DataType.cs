@@ -1,10 +1,3 @@
-using System.ComponentModel.DataAnnotations;
-using Mariadb.client.util;
-using Mariadb.message.server;
-
-
-
-
 namespace Mariadb.client;
 
 public enum DataType : byte
@@ -36,5 +29,5 @@ public enum DataType : byte
     BLOB = 252, //BlobColumn::new, BlobColumn::new),
     VARSTRING = 253, //StringColumn::new, StringColumn::new),
     STRING = 254, //StringColumn::new, StringColumn::new),
-    GEOMETRY = 255, //GeometryColumn::new, GeometryColumn::new);
+    GEOMETRY = 255 //GeometryColumn::new, GeometryColumn::new);
 }

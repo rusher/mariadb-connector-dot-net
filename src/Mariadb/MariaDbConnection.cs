@@ -3,15 +3,19 @@ using System.Data.Common;
 
 namespace Mariadb;
 
-
 public sealed class MariaDbConnection : DbConnection
 {
-    
     public MariaDbConnection(string? connectionString)
     {
         ConnectionString = connectionString ?? "";
         State = ConnectionState.Closed;
     }
+
+    public override string ConnectionString { get; set; }
+    public override string Database { get; }
+    public override ConnectionState State { get; }
+    public override string DataSource { get; }
+    public override string ServerVersion { get; }
 
     protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel)
     {
@@ -32,18 +36,11 @@ public sealed class MariaDbConnection : DbConnection
     {
         if (State != ConnectionState.Closed)
             throw new InvalidOperationException($"Cannot Open: State is {State}.");
-        DbConnectionStringBuilder builder = new DbConnectionStringBuilder();
+        var builder = new DbConnectionStringBuilder();
         builder.ConnectionString = ConnectionString;
 
-        Configuration options = new Configuration(builder);
-        
+        var options = new Configuration(builder);
     }
-
-    public override string ConnectionString { get; set; }
-    public override string Database { get; }
-    public override ConnectionState State { get; }
-    public override string DataSource { get; }
-    public override string ServerVersion { get; }
 
     protected override DbCommand CreateDbCommand()
     {

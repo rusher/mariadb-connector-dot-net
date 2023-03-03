@@ -7,30 +7,28 @@ namespace Mariadb.message;
 
 public interface IClientMessage
 {
-    
-  int Encode(IWriter writer, IContext context);
+    int Encode(IWriter writer, IContext context);
 
-  uint BatchUpdateLength();
+    uint BatchUpdateLength();
 
-  string Description();
+    string Description();
 
 
-  bool BinaryProtocol();
+    bool BinaryProtocol();
 
-  bool CanSkipMeta();
+    bool CanSkipMeta();
 
-  ICompletion ReadPacket(
-      DbCommand stmt,
-      int fetchSize,
-      int resultSetType,
-      bool closeOnCompletion,
-      IReader reader,
-      IWriter writer,
-      IContext context,
-      ExceptionFactory exceptionFactory,
-      bool traceEnable,
-      IClientMessage message);
+    ICompletion ReadPacket(
+        DbCommand stmt,
+        int fetchSize,
+        int resultSetType,
+        bool closeOnCompletion,
+        IReader reader,
+        IWriter writer,
+        IContext context,
+        ExceptionFactory exceptionFactory,
+        bool traceEnable,
+        IClientMessage message);
 
-  Stream GetLocalInfileInputStream();
-
+    Stream GetLocalInfileInputStream();
 }
