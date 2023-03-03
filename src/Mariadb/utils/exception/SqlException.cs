@@ -1,0 +1,20 @@
+using System.Data.Common;
+
+namespace Mariadb.utils.exception;
+
+public class SqlException : DbException
+{
+    public override string? SqlState { get; }
+
+    public SqlException() : base() { }
+
+    public SqlException(string? message) : base(message) { }
+
+    public SqlException(string? message, System.Exception? innerException) : base(message, innerException) { }
+    
+    public SqlException(string? message, int errorCode, string sqlState) : base(message, errorCode)
+    {
+        SqlState = sqlState;
+    }
+    
+}
