@@ -1,4 +1,5 @@
-using System.Data.Common;
+using System.Data;
+using Mariadb.client.util;
 using Mariadb.message;
 using Mariadb.utils;
 
@@ -6,57 +7,40 @@ namespace Mariadb.client;
 
 public interface IClient
 {
-    List<ICompletion> execute(IClientMessage message, bool canRedo);
+    IContext? Context { get; set; }
 
-    List<ICompletion> execute(IClientMessage message, DbCommand stmt, bool canRedo);
+    ExceptionFactory ExceptionFactory { get; }
+    HostAddress HostAddress { get; }
 
-    List<ICompletion> execute(
+    List<ICompletion> Execute(IClientMessage message, bool canRedo);
+
+    List<ICompletion> Execute(IClientMessage message, MariaDbCommand stmt, bool canRedo);
+
+    List<ICompletion> Execute(
         IClientMessage message,
-        DbCommand stmt,
-        int fetchSize,
-        long maxRows,
-        int resultSetType,
-        bool closeOnCompletion,
+        MariaDbCommand stmt,
+        CommandBehavior behavior,
         bool canRedo);
 
-    List<ICompletion> executePipeline(
+    List<ICompletion> ExecutePipeline(
         IClientMessage[] messages,
-        DbCommand stmt,
-        int fetchSize,
-        long maxRows,
-        int resultSetType,
-        bool closeOnCompletion,
+        MariaDbCommand stmt,
+        CommandBehavior behavior,
         bool canRedo);
 
-    void readStreamingResults(
+    void ReadStreamingResults(
         List<ICompletion> completions,
-        int fetchSize,
-        long maxRows,
-        int resultSetType,
-        bool closeOnCompletion);
+        CommandBehavior behavior);
 
-    //void closePrepare(Prepare prepare);
+    void ClosePrepare(IPrepare prepare);
 
-    void close();
+    void Close();
 
-    void setReadOnly(bool readOnly);
+    void SetReadOnly(bool readOnly);
 
-    int getSocketTimeout();
+    bool IsClosed();
 
-    void setSocketTimeout(int milliseconds);
+    void Reset();
 
-    bool isClosed();
-
-    /**
-     * Reset connection
-     */
-    void reset();
-
-    bool isPrimary();
-
-    IContext getContext();
-
-    ExceptionFactory getExceptionFactory();
-
-    HostAddress getHostAddress();
+    bool IsPrimary();
 }

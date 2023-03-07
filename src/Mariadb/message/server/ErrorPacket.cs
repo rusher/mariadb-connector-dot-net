@@ -37,9 +37,9 @@ public class ErrorPacket : ICompletion
         // issue a transaction
         if (context != null)
         {
-            var serverStatus = context.getServerStatus();
+            var serverStatus = context.ServerStatus;
             serverStatus |= ServerStatus.IN_TRANSACTION;
-            context.setServerStatus(serverStatus);
+            context.ServerStatus = serverStatus;
         }
     }
 }

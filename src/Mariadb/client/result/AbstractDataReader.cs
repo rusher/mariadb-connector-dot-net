@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Data;
 using System.Data.Common;
 using Mariadb.client.impl;
 using Mariadb.client.result.rowdecoder;
@@ -11,13 +12,17 @@ using Mariadb.utils.constant;
 
 namespace Mariadb.client.result;
 
-public class MariadbDataReader : DbDataReader, ICompletion
+public abstract class AbstractDataReader : DbDataReader, ICompletion
 {
     private static readonly BinaryRowDecoder BINARY_ROW_DECODER = new();
     private static readonly TextRowDecoder TEXT_ROW_DECODER = new();
     public static int NULL_LENGTH = -1;
+
+    private readonly int _maxIndex;
+    private readonly byte[] _nullBitmap;
+    private readonly bool _traceEnable;
+    protected CommandBehavior _behavior;
     protected bool _closed;
-    private bool _closeOnCompletion;
     protected IContext _context;
     protected byte[][] _data;
     protected int _dataSize;
@@ -25,42 +30,34 @@ public class MariadbDataReader : DbDataReader, ICompletion
     protected MutableInt _fieldIndex = new();
     private int _fieldLength;
     private bool _forceAlias;
-    protected bool _loaded;
     private Dictionary<string, int> _mapper;
-
-    private readonly int _maxIndex;
     protected IColumnDecoder[] _metaDataList;
-    private readonly byte[] _nullBitmap;
     protected bool _outputParameter;
 
     protected IReader _reader;
 
-    protected int _resultSetType;
     protected StandardReadableByteBuf _rowBuf = new(null, 0);
     protected IRowDecoder _rowDecoder;
     protected int _rowPointer = -1;
-    protected DbCommand _statement;
-    private readonly bool _traceEnable;
+    protected MariaDbCommand _statement;
 
-    public MariadbDataReader(
-        DbCommand stmt,
+    public AbstractDataReader(
+        MariaDbCommand stmt,
         bool binaryProtocol,
         IColumnDecoder[] metaDataList,
         IReader reader,
         IContext context,
-        int resultSetType,
-        bool closeOnCompletion,
-        bool traceEnable)
+        bool traceEnable, CommandBehavior behavior
+    )
     {
         _statement = stmt;
-        _closeOnCompletion = closeOnCompletion;
         _metaDataList = metaDataList;
         _maxIndex = _metaDataList.Length;
         _reader = reader;
-        _exceptionFactory = context.getExceptionFactory();
+        _exceptionFactory = context.ExceptionFactory;
         _context = context;
-        _resultSetType = resultSetType;
         _traceEnable = traceEnable;
+        _behavior = behavior;
         if (binaryProtocol)
         {
             _rowDecoder = BINARY_ROW_DECODER;
@@ -70,14 +67,23 @@ public class MariadbDataReader : DbDataReader, ICompletion
         {
             _rowDecoder = TEXT_ROW_DECODER;
         }
-
-        _data = new byte[10][];
-        while (ReadNext())
-        {
-        }
-
-        _loaded = true;
     }
+
+    public AbstractDataReader(IColumnDecoder[] metadataList, byte[][] data, IContext context, CommandBehavior behavior)
+    {
+        _metaDataList = metadataList;
+        _maxIndex = _metaDataList.Length;
+        _reader = null;
+        Loaded = true;
+        _exceptionFactory = context.ExceptionFactory;
+        _context = context;
+        _data = data;
+        _dataSize = data.Length;
+        _statement = null;
+        _behavior = behavior;
+    }
+
+    public bool Loaded { get; protected set; }
 
     public override int Depth { get; }
     public override int FieldCount { get; }
@@ -91,27 +97,27 @@ public class MariadbDataReader : DbDataReader, ICompletion
     public override int RecordsAffected { get; }
 
 
-    private bool ReadNext()
+    protected bool ReadNext()
     {
         var buf = _reader.ReadPacket(_traceEnable);
         switch (buf[0])
         {
             case 0xFF:
-                _loaded = true;
+                Loaded = true;
                 var errorPacket = new ErrorPacket(_reader.ReadableBufFromArray(buf), _context);
-                throw _exceptionFactory.create(
+                throw _exceptionFactory.Create(
                     errorPacket.Message, errorPacket.SqlState, errorPacket.ErrorCode);
 
             case 0xFE:
-                if ((_context.isEofDeprecated() && buf.Length < 16777215)
-                    || (!_context.isEofDeprecated() && buf.Length < 8))
+                if ((_context.EofDeprecated && buf.Length < 16777215)
+                    || (!_context.EofDeprecated && buf.Length < 8))
                 {
                     var readBuf = _reader.ReadableBufFromArray(buf);
                     readBuf.Skip(); // skip header
                     int serverStatus;
                     int warnings;
 
-                    if (!_context.isEofDeprecated())
+                    if (!_context.EofDeprecated)
                     {
                         // EOF_Packet
                         warnings = readBuf.ReadUnsignedShort();
@@ -127,9 +133,9 @@ public class MariadbDataReader : DbDataReader, ICompletion
                     }
 
                     _outputParameter = (serverStatus & ServerStatus.PS_OUT_PARAMETERS) != 0;
-                    _context.setServerStatus(serverStatus);
-                    _context.setWarning(warnings);
-                    _loaded = true;
+                    _context.ServerStatus = serverStatus;
+                    _context.Warning = warnings;
+                    Loaded = true;
                     return false;
                 }
 
@@ -164,6 +170,82 @@ public class MariadbDataReader : DbDataReader, ICompletion
     private void SetNull_rowBuf()
     {
         _rowBuf.Buf(null, 0, 0);
+    }
+
+    public void Close()
+    {
+        if (!Loaded)
+            try
+            {
+                SkipRemaining();
+            }
+            catch (Exception ioe)
+            {
+                throw _exceptionFactory.Create("Error while streaming resultSet data", "08000", ioe);
+            }
+
+        _closed = true;
+        if (_behavior == CommandBehavior.CloseConnection && _statement != null) _statement.CloseConnection();
+    }
+
+    public void CloseFromCommandClose(object lockObj)
+    {
+        lock (lockObj)
+        {
+            FetchRemaining();
+            _closed = true;
+        }
+    }
+
+    internal abstract void FetchRemaining();
+    internal abstract bool Streaming();
+
+    protected void SkipRemaining()
+    {
+        while (true)
+        {
+            var buf = _reader.ReadReusablePacket(_traceEnable);
+            switch (buf.GetUnsignedByte())
+            {
+                case 0xFF:
+                    Loaded = true;
+                    var errorPacket = new ErrorPacket(buf, _context);
+                    throw _exceptionFactory.Create(
+                        errorPacket.Message, errorPacket.SqlState, errorPacket.ErrorCode);
+
+                case 0xFE:
+                    if ((_context.EofDeprecated && buf.ReadableBytes() < 0xffffff)
+                        || (!_context.EofDeprecated && buf.ReadableBytes() < 8))
+                    {
+                        buf.Skip(); // skip header
+                        int serverStatus;
+                        int warnings;
+
+                        if (!_context.EofDeprecated)
+                        {
+                            // EOF_Packet
+                            warnings = buf.ReadUnsignedShort();
+                            serverStatus = buf.ReadUnsignedShort();
+                        }
+                        else
+                        {
+                            // OK_Packet with a 0xFE header
+                            buf.ReadLongLengthEncodedNotNull(); // skip update count
+                            buf.ReadLongLengthEncodedNotNull(); // skip insert id
+                            serverStatus = buf.ReadUnsignedShort();
+                            warnings = buf.ReadUnsignedShort();
+                        }
+
+                        _outputParameter = (serverStatus & ServerStatus.PS_OUT_PARAMETERS) != 0;
+                        _context.ServerStatus = serverStatus;
+                        _context.Warning = warnings;
+                        Loaded = true;
+                        return;
+                    }
+
+                    break;
+            }
+        }
     }
 
     private void CheckIndex(int index)

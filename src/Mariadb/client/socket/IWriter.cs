@@ -5,6 +5,7 @@ public interface IWriter
     void WriteByte(int value);
     void WriteShort(short value);
     void WriteInt(int value);
+    void WriteUInt(uint value);
     void WriteLong(long value);
     void WriteDouble(double value);
     void WriteFloat(float value);
@@ -22,7 +23,7 @@ public interface IWriter
     bool ThrowMaxAllowedLength(int length);
     long GetCmdLength();
     void PermitTrace(bool permitTrace);
-    void SetServerThreadId(long serverThreadId, HostAddress hostAddress);
+    void SetServerThreadId(long? serverThreadId, HostAddress hostAddress);
     void Mark();
     bool IsMarked();
     bool HasFlushed();

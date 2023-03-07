@@ -6,9 +6,9 @@ namespace Mariadb.utils;
 
 public class ExceptionFactory
 {
+    private readonly DbCommand _command;
     private readonly Configuration _conf;
     private readonly HostAddress _hostAddress;
-    private readonly DbCommand _command;
     private MariaDbConnection _connection;
     private long _threadId;
 
@@ -41,7 +41,7 @@ public class ExceptionFactory
 
     public string? Sql { get; }
 
-    private static string buildMsgText(
+    private static string BuildMsgText(
         string initialMessage,
         long threadId,
         Configuration conf,
@@ -63,23 +63,23 @@ public class ExceptionFactory
         return msg.ToString();
     }
 
-    public void setConnection(ExceptionFactory oldExceptionFactory)
+    public void SetConnection(ExceptionFactory oldExceptionFactory)
     {
         _connection = oldExceptionFactory._connection;
     }
 
-    public ExceptionFactory setConnection(MariaDbConnection connection)
+    public ExceptionFactory SetConnection(MariaDbConnection connection)
     {
         _connection = connection;
         return this;
     }
 
-    public void setThreadId(long threadId)
+    public void SetThreadId(long threadId)
     {
         _threadId = threadId;
     }
 
-    public ExceptionFactory of(DbCommand command)
+    public ExceptionFactory Of(DbCommand command)
     {
         return new ExceptionFactory(
             _connection,
@@ -90,7 +90,7 @@ public class ExceptionFactory
             Sql);
     }
 
-    public ExceptionFactory withSql(string sql)
+    public ExceptionFactory WithSql(string sql)
     {
         return new ExceptionFactory(
             _connection,
@@ -101,10 +101,10 @@ public class ExceptionFactory
             sql);
     }
 
-    private SqlException createException(
+    private SqlException CreateException(
         string initialMessage, string sqlState, int errorCode, Exception cause)
     {
-        var msg = buildMsgText(initialMessage, _threadId, _conf, Sql);
+        var msg = BuildMsgText(initialMessage, _threadId, _conf, Sql);
 
         if ("70100".Equals(sqlState)) // ER_QUERY_INTERRUPTED
             return new DbTimeoutException(msg, errorCode, sqlState);
@@ -159,34 +159,34 @@ public class ExceptionFactory
         return returnEx;
     }
 
-    private SqlException createException(string initialMessage, Exception cause)
+    private SqlException CreateException(string initialMessage, Exception cause)
     {
-        var msg = buildMsgText(initialMessage, _threadId, _conf, Sql);
+        var msg = BuildMsgText(initialMessage, _threadId, _conf, Sql);
         return new DbTransientConnectionException(msg, cause);
     }
 
-    public SqlException notSupported(string message)
+    public SqlException NotSupported(string message)
     {
-        return createException(message, "0A000", -1, null);
+        return CreateException(message, "0A000", -1, null);
     }
 
-    public SqlException create(string message)
+    public SqlException Create(string message)
     {
-        return createException(message, "42000", -1, null);
+        return CreateException(message, "42000", -1, null);
     }
 
-    public SqlException create(string message, string sqlState)
+    public SqlException Create(string message, string sqlState)
     {
-        return createException(message, sqlState, -1, null);
+        return CreateException(message, sqlState, -1, null);
     }
 
-    public SqlException create(string message, string sqlState, Exception cause)
+    public SqlException Create(string message, string sqlState, Exception cause)
     {
-        return createException(message, sqlState, -1, cause);
+        return CreateException(message, sqlState, -1, cause);
     }
 
-    public SqlException create(string message, string sqlState, int errorCode)
+    public SqlException Create(string message, string sqlState, int errorCode)
     {
-        return createException(message, sqlState, errorCode, null);
+        return CreateException(message, sqlState, errorCode, null);
     }
 }

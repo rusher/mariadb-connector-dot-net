@@ -110,7 +110,7 @@ public class TextRowDecoder : IRowDecoder
 
     public bool WasNull(byte[] nullBitmap, MutableInt fieldIndex, int fieldLength)
     {
-        return fieldLength == MariadbDataReader.NULL_LENGTH;
+        return fieldLength == AbstractDataReader.NULL_LENGTH;
     }
 
     public int SetPosition(
@@ -141,7 +141,7 @@ public class TextRowDecoder : IRowDecoder
         switch (len)
         {
             case 251:
-                return MariadbDataReader.NULL_LENGTH;
+                return AbstractDataReader.NULL_LENGTH;
             case 252:
                 return rowBuf.ReadUnsignedShort();
             case 253:

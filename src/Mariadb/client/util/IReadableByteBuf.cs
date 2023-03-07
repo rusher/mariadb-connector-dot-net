@@ -25,7 +25,7 @@ public interface IReadableByteBuf
     int ReadUnsignedMedium();
     int ReadInt();
     int ReadIntBE();
-    long ReadUnsignedInt();
+    uint ReadUnsignedInt();
     long ReadLong();
     long ReadLongBE();
     void ReadBytes(byte[] dst);

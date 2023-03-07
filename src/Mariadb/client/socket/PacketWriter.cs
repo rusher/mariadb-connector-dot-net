@@ -8,10 +8,10 @@ namespace Mariadb.client.socket;
 
 public class PacketWriter : IWriter
 {
-  /**
+    /**
      * initial buffer size
      */
-  public static int SMALL_BUFFER_SIZE = 8192;
+    public static int SMALL_BUFFER_SIZE = 8192;
 
     private static readonly Ilogger logger = Loggers.getLogger("PacketWriter");
     private static readonly byte QUOTE = (byte)'\'';
@@ -21,28 +21,28 @@ public class PacketWriter : IWriter
     private static readonly int MEDIUM_BUFFER_SIZE = 128 * 1024;
     private static readonly int LARGE_BUFFER_SIZE = 1024 * 1024;
     private static readonly int MAX_PACKET_LENGTH = 0x00ffffff + 4;
+    private readonly uint? _maxAllowedPacket;
+    private readonly int _maxPacketLength = MAX_PACKET_LENGTH;
     private readonly uint _maxQuerySizeToLog;
-    private readonly NetworkStream _out;
+    private readonly Socket _out;
+    private readonly MutableByte _sequence;
 
     private bool _bufContainDataAfterMark;
     private long _cmdLength;
     protected MutableByte _compressSequence;
     private int _mark = -1;
-    private readonly int? _maxAllowedPacket;
-    private readonly int _maxPacketLength = MAX_PACKET_LENGTH;
     private bool _permitTrace = true;
     private int _pos = 4;
-    private readonly MutableByte _sequence;
     private string _serverThreadLog = "";
 
     public PacketWriter(
-        NetworkStream outStream,
+        Socket socket,
         uint maxQuerySizeToLog,
-        int? maxAllowedPacket,
+        uint? maxAllowedPacket,
         MutableByte sequence,
         MutableByte compressSequence)
     {
-        _out = outStream;
+        _out = socket;
         Buf = new byte[SMALL_BUFFER_SIZE];
         _maxQuerySizeToLog = maxQuerySizeToLog;
         _cmdLength = 0;
@@ -97,6 +97,27 @@ public class PacketWriter : IWriter
     }
 
     public void WriteInt(int value)
+    {
+        if (4 > Buf.Length - Pos)
+        {
+            // not enough space remaining
+            var arr = new byte[4];
+            arr[0] = (byte)value;
+            arr[1] = (byte)(value >> 8);
+            arr[2] = (byte)(value >> 16);
+            arr[3] = (byte)(value >> 24);
+            WriteBytes(arr, 0, 4);
+            return;
+        }
+
+        Buf[_pos] = (byte)value;
+        Buf[_pos + 1] = (byte)(value >> 8);
+        Buf[_pos + 2] = (byte)(value >> 16);
+        Buf[_pos + 3] = (byte)(value >> 24);
+        _pos += 4;
+    }
+
+    public void WriteUInt(uint value)
     {
         if (4 > Buf.Length - Pos)
         {
@@ -359,7 +380,7 @@ public class PacketWriter : IWriter
                             // is low surrogate
                             var surrogatePairs =
                                 (currChar << 10) + nextChar + (0x010000 - (0xD800 << 10) - 0xDC00);
-                            Buf[_pos++] = (byte)(0xf0 | surrogatePairs >> 18);
+                            Buf[_pos++] = (byte)(0xf0 | (surrogatePairs >> 18));
                             Buf[_pos++] = (byte)(0x80 | ((surrogatePairs >> 12) & 0x3f));
                             Buf[_pos++] = (byte)(0x80 | ((surrogatePairs >> 6) & 0x3f));
                             Buf[_pos++] = (byte)(0x80 | (surrogatePairs & 0x3f));
@@ -380,7 +401,7 @@ public class PacketWriter : IWriter
             }
             else
             {
-                Buf[_pos++] = (byte)(0xe0 | currChar >> 12);
+                Buf[_pos++] = (byte)(0xe0 | (currChar >> 12));
                 Buf[_pos++] = (byte)(0x80 | ((currChar >> 6) & 0x3f));
                 Buf[_pos++] = (byte)(0x80 | (currChar & 0x3f));
             }
@@ -471,7 +492,7 @@ public class PacketWriter : IWriter
                             // is low surrogate
                             var surrogatePairs =
                                 (currChar << 10) + nextChar + (0x010000 - (0xD800 << 10) - 0xDC00);
-                            Buf[_pos++] = (byte)(0xf0 | surrogatePairs >> 18);
+                            Buf[_pos++] = (byte)(0xf0 | (surrogatePairs >> 18));
                             Buf[_pos++] = (byte)(0x80 | ((surrogatePairs >> 12) & 0x3f));
                             Buf[_pos++] = (byte)(0x80 | ((surrogatePairs >> 6) & 0x3f));
                             Buf[_pos++] = (byte)(0x80 | (surrogatePairs & 0x3f));
@@ -492,7 +513,7 @@ public class PacketWriter : IWriter
             }
             else
             {
-                Buf[_pos++] = (byte)(0xe0 | currChar >> 12);
+                Buf[_pos++] = (byte)(0xe0 | (currChar >> 12));
                 Buf[_pos++] = (byte)(0x80 | ((currChar >> 6) & 0x3f));
                 Buf[_pos++] = (byte)(0x80 | (currChar & 0x3f));
             }
@@ -577,12 +598,12 @@ public class PacketWriter : IWriter
         Buf[1] = 0x00;
         Buf[2] = 0x00;
         Buf[3] = _sequence.incrementAndGet();
-        _out.Write(Buf, 0, 4);
+        _out.Send(Buf, 0, 4, 0);
 
         if (logger.isTraceEnabled())
             logger.trace(
                 $"send com : content length=0 {_serverThreadLog}\n{LoggerHelper.Hex(Buf, 0, 4)}");
-        _out.Flush();
+        //_out.Flush();
         _cmdLength = 0;
     }
 
@@ -623,7 +644,7 @@ public class PacketWriter : IWriter
         _permitTrace = permitTrace;
     }
 
-    public void SetServerThreadId(long serverThreadId, HostAddress hostAddress)
+    public void SetServerThreadId(long? serverThreadId, HostAddress hostAddress)
     {
         var isMaster = hostAddress?.Primary;
         _serverThreadLog =
@@ -652,7 +673,7 @@ public class PacketWriter : IWriter
         var end = _pos;
         _pos = _mark;
         WriteSocket(true);
-        _out.Flush();
+        //_out.Flush();
         InitPacket();
 
         Array.Copy(Buf, _mark, Buf, _pos, end - _mark);
@@ -770,8 +791,8 @@ public class PacketWriter : IWriter
             Buf[2] = (byte)((_pos - 4) >>> 16);
             Buf[3] = _sequence.incrementAndGet();
             CheckMaxAllowedLength(_pos - 4);
-            _out.Write(Buf, 0, _pos);
-            if (commandEnd) _out.Flush();
+            _out.Send(Buf, 0, _pos, 0);
+            // if (commandEnd) _out.Flush();
             _cmdLength += _pos - 4;
 
             if (logger.isTraceEnabled())

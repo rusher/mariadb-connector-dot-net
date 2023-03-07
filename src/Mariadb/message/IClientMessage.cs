@@ -1,4 +1,4 @@
-using System.Data.Common;
+using System.Data;
 using Mariadb.client;
 using Mariadb.client.socket;
 using Mariadb.utils;
@@ -7,11 +7,10 @@ namespace Mariadb.message;
 
 public interface IClientMessage
 {
+    public string Description { get; }
     int Encode(IWriter writer, IContext context);
 
     uint BatchUpdateLength();
-
-    string Description();
 
 
     bool BinaryProtocol();
@@ -19,15 +18,14 @@ public interface IClientMessage
     bool CanSkipMeta();
 
     ICompletion ReadPacket(
-        DbCommand stmt,
-        int fetchSize,
-        int resultSetType,
-        bool closeOnCompletion,
+        MariaDbCommand stmt,
+        CommandBehavior behavior,
         IReader reader,
         IWriter writer,
         IContext context,
         ExceptionFactory exceptionFactory,
         bool traceEnable,
+        object lockObj,
         IClientMessage message);
 
     Stream GetLocalInfileInputStream();

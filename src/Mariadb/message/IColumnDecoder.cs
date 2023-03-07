@@ -30,7 +30,7 @@ public interface IColumnDecoder : IColumn
     double DecodeDoubleText(IReadableByteBuf buf, int length);
     double DecodeDoubleBinary(IReadableByteBuf buf, int length);
 
-    static IColumnDecoder decode(IReadableByteBuf buf, bool extendedInfo)
+    static IColumnDecoder Decode(IReadableByteBuf buf, bool extendedInfo)
     {
         // skip first strings
         var stringPos = new int[5];

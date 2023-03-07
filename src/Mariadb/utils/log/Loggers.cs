@@ -2,10 +2,10 @@ namespace Mariadb.utils.log;
 
 public class Loggers
 {
-  /**
+    /**
      * factory
      */
-  private static readonly ILoggerFactory LOGGER_FACTORY;
+    private static readonly ILoggerFactory LOGGER_FACTORY;
 
     static Loggers()
     {

@@ -10,20 +10,20 @@ public class PacketReader : IReader
     private const int REUSABLE_BUFFER_LENGTH = 1024;
     private const int MAX_PACKET_SIZE = 0xffffff;
     private static readonly Ilogger logger = Loggers.getLogger("PacketReader");
-    private readonly NetworkStream _in;
     private readonly uint _maxQuerySizeToLog;
 
     private readonly MutableByte _sequence;
-    private string _serverThreadLog = "";
+    private readonly Socket _socket;
 
     private readonly byte[] header = new byte[4];
 
     private readonly IReadableByteBuf readBuf = new StandardReadableByteBuf(null, 0);
     private readonly byte[] reusableArray = new byte[REUSABLE_BUFFER_LENGTH];
+    private string _serverThreadLog = "";
 
-    public PacketReader(NetworkStream networkStream, Configuration conf, MutableByte sequence)
+    public PacketReader(Socket socket, Configuration conf, MutableByte sequence)
     {
-        _in = networkStream;
+        _socket = socket;
         _maxQuerySizeToLog = conf.MaxQuerySizeToLog;
         _sequence = sequence;
     }
@@ -48,7 +48,7 @@ public class PacketReader : IReader
         var off = 0;
         do
         {
-            var count = _in.Read(header, off, remaining);
+            var count = _socket.Receive(header, off, remaining, SocketFlags.Partial);
             if (count < 0)
                 throw new IOException(
                     "unexpected end of stream, read "
@@ -76,7 +76,7 @@ public class PacketReader : IReader
         off = 0;
         do
         {
-            var count = _in.Read(rawBytes, off, remaining);
+            var count = _socket.Receive(rawBytes, off, remaining, SocketFlags.Partial);
             if (count < 0)
                 throw new IOException(
                     "unexpected end of stream, read "
@@ -105,7 +105,7 @@ public class PacketReader : IReader
         var off = 0;
         do
         {
-            var count = _in.Read(header, off, remaining);
+            var count = _socket.Receive(header, off, remaining, SocketFlags.Partial);
             if (count < 0)
                 throw new IOException(
                     "unexpected end of stream, read "
@@ -128,7 +128,7 @@ public class PacketReader : IReader
         off = 0;
         do
         {
-            var count = _in.Read(rawBytes, off, remaining);
+            var count = _socket.Receive(rawBytes, off, remaining, SocketFlags.Partial);
             if (count < 0)
                 throw new IOException(
                     "unexpected end of stream, read "
@@ -156,7 +156,7 @@ public class PacketReader : IReader
                 off = 0;
                 do
                 {
-                    var count = _in.Read(header, off, remaining);
+                    var count = _socket.Receive(header, off, remaining, SocketFlags.Partial);
                     if (count < 0) throw new IOException("unexpected end of stream, read " + off + " bytes from 4");
                     remaining -= count;
                     off += count;
@@ -164,19 +164,19 @@ public class PacketReader : IReader
 
                 packetLength = (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
 
-                var currentbufLength = rawBytes.Length;
-                var newRawBytes = new byte[currentbufLength + packetLength];
-                Array.Copy(rawBytes, 0, newRawBytes, 0, currentbufLength);
+                var currentBufLength = rawBytes.Length;
+                var newRawBytes = new byte[currentBufLength + packetLength];
+                Array.Copy(rawBytes, 0, newRawBytes, 0, currentBufLength);
                 rawBytes = newRawBytes;
 
                 // ***************************************************
                 // Read content
                 // ***************************************************
                 remaining = packetLength;
-                off = currentbufLength;
+                off = currentBufLength;
                 do
                 {
-                    var count = _in.Read(rawBytes, off, remaining);
+                    var count = _socket.Receive(rawBytes, off, remaining, SocketFlags.Partial);
                     if (count < 0)
                         throw new IOException(
                             "unexpected end of stream, read "
@@ -189,7 +189,7 @@ public class PacketReader : IReader
 
                 if (traceEnable)
                     logger.trace(
-                        $"read: {_serverThreadLog}\n{LoggerHelper.Hex(header, rawBytes, currentbufLength, packetLength, _maxQuerySizeToLog)}");
+                        $"read: {_serverThreadLog}\n{LoggerHelper.Hex(header, rawBytes, currentBufLength, packetLength, _maxQuerySizeToLog)}");
 
                 lastPacketLength += packetLength;
             } while (packetLength == MAX_PACKET_SIZE);
@@ -213,7 +213,7 @@ public class PacketReader : IReader
         var off = 0;
         do
         {
-            var count = _in.Read(header, off, remaining);
+            var count = _socket.Receive(header, off, remaining, SocketFlags.Partial);
             if (count < 0)
                 throw new IOException(
                     "unexpected end of stream, read "
@@ -230,7 +230,7 @@ public class PacketReader : IReader
         // skipping 
         do
         {
-            var count = _in.Read(header, 0, Math.Min(4, remaining));
+            var count = _socket.Receive(header, 0, Math.Min(4, remaining), SocketFlags.Partial);
             if (count < 0)
                 throw new IOException(
                     "unexpected end of stream, skipping bytes (socket was closed by server)");
@@ -250,7 +250,7 @@ public class PacketReader : IReader
                 off = 0;
                 do
                 {
-                    var count = _in.Read(header, off, remaining);
+                    var count = _socket.Receive(header, off, remaining, SocketFlags.Partial);
                     if (count < 0) throw new IOException("unexpected end of stream, read " + off + " bytes from 4");
                     remaining -= count;
                     off += count;
@@ -262,7 +262,7 @@ public class PacketReader : IReader
                 // skipping 
                 do
                 {
-                    var count = _in.Read(header, 0, Math.Min(4, remaining));
+                    var count = _socket.Receive(header, 0, Math.Min(4, remaining), SocketFlags.Partial);
                     if (count < 0)
                         throw new IOException(
                             "unexpected end of stream, skipping bytes (socket was closed by server)");
@@ -282,10 +282,10 @@ public class PacketReader : IReader
 
     public void Close()
     {
-        _in.Close();
+        _socket.Close();
     }
 
-    public void SetServerThreadId(long serverThreadId, HostAddress hostAddress)
+    public void SetServerThreadId(long? serverThreadId, HostAddress hostAddress)
     {
         var isMaster = hostAddress?.Primary;
         _serverThreadLog =

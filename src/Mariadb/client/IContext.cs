@@ -1,70 +1,36 @@
+using Mariadb.message.server.util;
 using Mariadb.utils;
 
 namespace Mariadb.client;
 
 public interface IContext
 {
-    long getThreadId();
+    long ThreadId { get; }
+    ulong ServerCapabilities { get; }
+    ulong ClientCapabilities { get; }
+    byte[] Seed { get; }
+    ServerVersion Version { get; }
+    bool EofDeprecated { get; }
+    bool SkipMeta { get; }
+    bool ExtendedInfo { get; }
+    Configuration Conf { get; }
+    ExceptionFactory ExceptionFactory { get; }
 
-    byte[] getSeed();
+    int ServerStatus { get; set; }
+    string Database { get; set; }
+    int TransactionIsolationLevel { get; set; }
+    int Warning { get; set; }
+    IPrepareCache PrepareCache { get; }
+    int StateFlag { get; set; }
 
-    bool hasServerCapability(long flag);
+    bool HasServerCapability(ulong flag);
 
-    bool hasClientCapability(long flag);
+    bool HasClientCapability(ulong flag);
 
-    bool permitPipeline();
+    bool PermitPipeline();
 
-    int getServerStatus();
 
-    void setServerStatus(int serverStatus);
-
-    string getDatabase();
-
-    void setDatabase(string database);
-
-    IServerVersion getVersion();
-
-    bool isEofDeprecated();
-
-    bool canSkipMeta();
-
-    bool isExtendedInfo();
-
-    int getWarning();
-
-    void setWarning(int warning);
-
-    ExceptionFactory getExceptionFactory();
-
-    Configuration getConf();
-
-    int getTransactionIsolationLevel();
-
-    void setTransactionIsolationLevel(int transactionIsolationLevel);
-
-    //PrepareCache getPrepareCache();
-
-    /**
-     * Reset prepare cache (after a failover)
-     */
-    void resetPrepareCache();
-
-    /**
-   * return connection current state change flag
-   *
-   * @return connection current state change flag
-   */
-    int getStateFlag();
-
-    /**
-     * reset connection state change flag
-     */
-    void resetStateFlag();
-
-    /**
-   * Indicate connection state (for pooling)
-   *
-   * @param state indicate that some connection state has changed
-   */
-    void addStateFlag(int state);
+    void ResetPrepareCache();
+    void ResetStateFlag();
+    void AddStateFlag(int state);
 }

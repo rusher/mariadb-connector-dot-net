@@ -11,5 +11,5 @@ public interface IReader
     void SkipPacket();
     MutableByte GetSequence();
     void Close();
-    void SetServerThreadId(long serverThreadId, HostAddress hostAddress);
+    void SetServerThreadId(long? serverThreadId, HostAddress hostAddress);
 }

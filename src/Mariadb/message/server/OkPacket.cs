@@ -17,10 +17,10 @@ public class OkPacket : ICompletion
         buf.Skip(); // ok header
         AffectedRows = buf.ReadLongLengthEncodedNotNull();
         LastInsertId = buf.ReadLongLengthEncodedNotNull();
-        context.setServerStatus(buf.ReadUnsignedShort());
-        context.setWarning(buf.ReadUnsignedShort());
+        context.ServerStatus = buf.ReadUnsignedShort();
+        context.Warning = buf.ReadUnsignedShort();
 
-        if (buf.ReadableBytes() > 0 && context.hasClientCapability(Capabilities.CLIENT_SESSION_TRACK))
+        if (buf.ReadableBytes() > 0 && context.HasClientCapability(Capabilities.CLIENT_SESSION_TRACK))
         {
             buf.Skip(buf.ReadIntLengthEncodedNotNull()); // skip info
             while (buf.ReadableBytes() > 0)
@@ -39,7 +39,7 @@ public class OkPacket : ICompletion
                             buf.ReadIntLengthEncodedNotNull();
                             var dbLen = buf.ReadLength();
                             var database = dbLen == null ? null : buf.ReadString(dbLen.Value);
-                            context.setDatabase(string.IsNullOrEmpty(database) ? null : database);
+                            context.Database = string.IsNullOrEmpty(database) ? null : database;
                             logger.debug($"Database change: is '{database}'");
                             break;
 

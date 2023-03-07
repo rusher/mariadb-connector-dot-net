@@ -172,7 +172,7 @@ public class BinaryRowDecoder : IRowDecoder
             fieldIndex.incrementAndGet();
         }
 
-        if (WasNull(nullBitmap, fieldIndex, 0)) return MariadbDataReader.NULL_LENGTH;
+        if (WasNull(nullBitmap, fieldIndex, 0)) return AbstractDataReader.NULL_LENGTH;
 
         // read asked field position and length
         switch (metadataList[fieldIndex.Value].GetType())

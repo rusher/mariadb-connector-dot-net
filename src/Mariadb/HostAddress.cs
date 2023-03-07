@@ -13,17 +13,17 @@ public class HostAddress
         Primary = primary;
     }
 
-    public static HostAddress from(string host, uint port)
+    public static HostAddress From(string host, uint port)
     {
         return new HostAddress(host, port, null);
     }
 
-    public static HostAddress from(string host, uint port, bool? primary)
+    public static HostAddress From(string host, uint port, bool? primary)
     {
         return new HostAddress(host, port, primary);
     }
 
-    public static List<HostAddress> parse(string spec, HaMode haMode)
+    public static List<HostAddress> Parse(string spec, HaMode haMode)
     {
         if ("".Equals(spec)) return new List<HostAddress>();
         var tokens = spec.Trim().Split(",");
@@ -34,15 +34,15 @@ public class HostAddress
         {
             var token = tokens[i];
             if (token.StartsWith("address="))
-                arr.Add(parseParameterHostAddress(token, haMode, i == 0));
+                arr.Add(ParseParameterHostAddress(token, haMode, i == 0));
             else
-                arr.Add(parseSimpleHostAddress(token, haMode, i == 0));
+                arr.Add(ParseSimpleHostAddress(token, haMode, i == 0));
         }
 
         return arr;
     }
 
-    private static HostAddress parseSimpleHostAddress(string str, HaMode haMode, bool first)
+    private static HostAddress ParseSimpleHostAddress(string str, HaMode haMode, bool first)
     {
         string host;
         uint port = 3306;
@@ -52,14 +52,14 @@ public class HostAddress
             /* IPv6 addresses in URLs are enclosed in square brackets */
             var ind = str.IndexOf(']');
             host = str.Substring(1, ind);
-            if (ind != str.Length - 1 && str[ind + 1] == ':') port = getPort(str.Substring(ind + 2));
+            if (ind != str.Length - 1 && str[ind + 1] == ':') port = GetPort(str.Substring(ind + 2));
         }
         else if (str.Contains(":"))
         {
             /* Parse host:port */
             var hostPort = str.Split(":");
             host = hostPort[0];
-            port = getPort(hostPort[1]);
+            port = GetPort(hostPort[1]);
         }
         else
         {
@@ -72,13 +72,13 @@ public class HostAddress
         return new HostAddress(host, port, primary);
     }
 
-    private static uint getPort(string portString)
+    private static uint GetPort(string portString)
     {
         if (uint.TryParse(portString, out var port)) return port;
         throw new ArgumentException($"Port has wrong int32 value '{portString}'.");
     }
 
-    private static HostAddress parseParameterHostAddress(string str, HaMode haMode, bool first)
+    private static HostAddress ParseParameterHostAddress(string str, HaMode haMode, bool first)
     {
         string host = null;
         uint port = 3306;
@@ -100,7 +100,7 @@ public class HostAddress
                     host = value.Replace("[", "").Replace("]", "");
                     break;
                 case "port":
-                    port = getPort(value);
+                    port = GetPort(value);
                     break;
                 case "type":
                     if ("master".Equals(value.ToLowerInvariant()) || "primary".Equals(value.ToLowerInvariant()))

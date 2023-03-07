@@ -1,8 +1,9 @@
-using System.Data.Common;
+using System.Data;
 using System.Text.RegularExpressions;
 using Mariadb.client;
 using Mariadb.client.impl;
 using Mariadb.client.result;
+using Mariadb.client.result.rowdecoder;
 using Mariadb.client.socket;
 using Mariadb.client.util;
 using Mariadb.message.server;
@@ -10,18 +11,14 @@ using Mariadb.utils;
 
 namespace Mariadb.message;
 
-internal abstract class AbstractClientMessage : IClientMessage
+public abstract class AbstractClientMessage : IClientMessage
 {
     public abstract int Encode(IWriter writer, IContext context);
+    public abstract string Description { get; }
 
     public uint BatchUpdateLength()
     {
         return 0;
-    }
-
-    public string Description()
-    {
-        return null;
     }
 
     public bool BinaryProtocol()
@@ -35,15 +32,14 @@ internal abstract class AbstractClientMessage : IClientMessage
     }
 
     public ICompletion ReadPacket(
-        DbCommand stmt,
-        int fetchSize,
-        int resultSetType,
-        bool closeOnCompletion,
+        MariaDbCommand stmt,
+        CommandBehavior behavior,
         IReader reader,
         IWriter writer,
         IContext context,
         ExceptionFactory exceptionFactory,
         bool traceEnable,
+        object lockObj,
         IClientMessage message)
     {
         var buf = reader.ReadReusablePacket(traceEnable);
@@ -64,8 +60,8 @@ internal abstract class AbstractClientMessage : IClientMessage
                 // have issue a transaction
                 var errorPacket = new ErrorPacket(buf, context);
                 throw exceptionFactory
-                    .withSql(Description())
-                    .create(
+                    .WithSql(Description)
+                    .Create(
                         errorPacket.Message, errorPacket.SqlState, errorPacket.ErrorCode);
             case 0xfb:
                 buf.Skip(1); // skip header
@@ -78,9 +74,9 @@ internal abstract class AbstractClientMessage : IClientMessage
                     if (!ValidateLocalFileName(fileName, context))
                         exception =
                             exceptionFactory
-                                .withSql(Description())
-                                .create(
-                                    $"LOAD DATA LOCAL INFILE asked for file '{fileName}' that doesn't correspond to initial query {Description()}. Possible malicious proxy changing server answer ! Command interrupted",
+                                .WithSql(Description)
+                                .Create(
+                                    $"LOAD DATA LOCAL INFILE asked for file '{fileName}' that doesn't correspond to initial query {Description}. Possible malicious proxy changing server answer ! Command interrupted",
                                     "HY000");
                     else
                         try
@@ -91,8 +87,8 @@ internal abstract class AbstractClientMessage : IClientMessage
                         {
                             exception =
                                 exceptionFactory
-                                    .withSql(Description())
-                                    .create("Could not send file : " + f.Message, "HY000", f);
+                                    .WithSql(Description)
+                                    .Create("Could not send file : " + f.Message, "HY000", f);
                         }
                 }
 
@@ -118,14 +114,13 @@ internal abstract class AbstractClientMessage : IClientMessage
                 var completion =
                     ReadPacket(
                         stmt,
-                        fetchSize,
-                        resultSetType,
-                        closeOnCompletion,
+                        behavior,
                         reader,
                         writer,
                         context,
                         exceptionFactory,
                         traceEnable,
+                        lockObj,
                         message);
                 if (exception != null) throw exception;
                 return completion;
@@ -137,11 +132,11 @@ internal abstract class AbstractClientMessage : IClientMessage
                 var fieldCount = buf.ReadIntLengthEncodedNotNull();
 
                 IColumnDecoder[] ci;
-                var canSkipMeta = context.canSkipMeta() && CanSkipMeta();
+                var canSkipMeta = context.SkipMeta && CanSkipMeta();
                 var skipMeta = canSkipMeta ? buf.ReadByte() == 0 : false;
                 if (canSkipMeta && skipMeta)
                 {
-                    ci = ((BasePreparedStatement)stmt).getMeta();
+                    ci = stmt._getMeta();
                 }
                 else
                 {
@@ -149,25 +144,30 @@ internal abstract class AbstractClientMessage : IClientMessage
                     ci = new IColumnDecoder[fieldCount];
                     for (var i = 0; i < fieldCount; i++)
                         ci[i] =
-                            IColumnDecoder.decode(
+                            IColumnDecoder.Decode(
                                 new StandardReadableByteBuf(reader.ReadPacket(traceEnable)),
-                                context.isExtendedInfo());
+                                context.ExtendedInfo);
                 }
 
-                if (canSkipMeta && !skipMeta) ((BasePreparedStatement)stmt).updateMeta(ci);
+                if (canSkipMeta && !skipMeta) stmt.UpdateMeta(ci);
 
                 // intermediate EOF
-                if (!context.isEofDeprecated()) reader.SkipPacket();
-
-                return new MariadbDataReader(
+                if (!context.EofDeprecated) reader.SkipPacket();
+                if (behavior == CommandBehavior.SequentialAccess)
+                    return new StreamingDataReader(stmt,
+                        BinaryProtocol(),
+                        ci,
+                        reader,
+                        context,
+                        traceEnable,
+                        lockObj, behavior);
+                return new CompleteDataReader(
                     stmt,
                     BinaryProtocol(),
                     ci,
                     reader,
                     context,
-                    resultSetType,
-                    closeOnCompletion,
-                    traceEnable);
+                    traceEnable, behavior);
         }
     }
 
@@ -181,7 +181,7 @@ internal abstract class AbstractClientMessage : IClientMessage
         return false;
     }
 
-    private static bool ValidateLocalFileName(
+    public static bool ValidateLocalFileName(
         string sql, IParameters parameters, string fileName, IContext context)
     {
         var pattern =

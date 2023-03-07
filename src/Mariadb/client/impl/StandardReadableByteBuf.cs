@@ -223,13 +223,13 @@ public class StandardReadableByteBuf : IReadableByteBuf
                + (_buf[Pos++] & 0xff);
     }
 
-    public long ReadUnsignedInt()
+    public uint ReadUnsignedInt()
     {
-        return ((_buf[Pos++] & 0xff)
-                + ((_buf[Pos++] & 0xff) << 8)
-                + ((_buf[Pos++] & 0xff) << 16)
-                + ((long)(_buf[Pos++] & 0xff) << 24))
-               & 0xffffffffL;
+        return (uint)(((_buf[Pos++] & 0xff)
+                       + ((_buf[Pos++] & 0xff) << 8)
+                       + ((_buf[Pos++] & 0xff) << 16)
+                       + ((long)(_buf[Pos++] & 0xff) << 24))
+                      & 0xffffffffL);
     }
 
     public long ReadLong()
