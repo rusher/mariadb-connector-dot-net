@@ -18,7 +18,6 @@ public class HandshakeResponse : AbstractClientMessage
     private static readonly string _THREAD = "_thread";
     private static string _JAVA_VENDOR = "_java_vendor";
     private static string _JAVA_VERSION = "_java_version";
-    private string _authenticationPluginType;
     private readonly ulong _clientCapabilities;
     private readonly string _connectionAttributes;
     private readonly string _database;
@@ -28,6 +27,7 @@ public class HandshakeResponse : AbstractClientMessage
     private readonly byte[] _seed;
 
     private readonly string _username;
+    private string _authenticationPluginType;
 
     public HandshakeResponse(
         string username,
@@ -66,7 +66,7 @@ public class HandshakeResponse : AbstractClientMessage
         encoder.WriteBytes(valBytes);
     }
 
-    private static void WriteConnectAttributes(
+    private static async Task WriteConnectAttributes(
         IWriter writer, string connectionAttributes, string host)
     {
         var tmpWriter = new PacketWriter(null, 0, 0, null, null);
@@ -105,11 +105,11 @@ public class HandshakeResponse : AbstractClientMessage
             }
         }
 
-        writer.WriteLength(tmpWriter.Pos);
-        writer.WriteBytes(tmpWriter.Buf, 0, tmpWriter.Pos);
+        await writer.WriteLength(tmpWriter.Pos);
+        await writer.WriteBytes(tmpWriter.Buf, 0, tmpWriter.Pos);
     }
 
-    public override int Encode(IWriter writer, IContext context)
+    public override async Task<int> Encode(CancellationToken cancellationToken, IWriter writer, IContext context)
     {
         byte[] authData;
         if (string.Equals("mysql_clear_password", _authenticationPluginType))
@@ -125,46 +125,46 @@ public class HandshakeResponse : AbstractClientMessage
             authData = NativePasswordPlugin.encryptPassword(_password, _seed);
         }
 
-        writer.WriteInt((int)_clientCapabilities);
-        writer.WriteInt(1024 * 1024 * 1024);
-        writer.WriteByte(_exchangeCharset); // 1
+        await writer.WriteInt((int)_clientCapabilities);
+        await writer.WriteInt(1024 * 1024 * 1024);
+        await writer.WriteByte(_exchangeCharset); // 1
 
-        writer.WriteBytes(new byte[19]); // 19
-        writer.WriteInt((int)(_clientCapabilities >> 32)); // Maria extended flag
+        await writer.WriteBytes(new byte[19]); // 19
+        await writer.WriteInt((int)(_clientCapabilities >> 32)); // Maria extended flag
 
-        writer.WriteString(_username != null ? _username : WindowsIdentity.GetCurrent().Name);
-        writer.WriteByte(0x00);
+        await writer.WriteString(_username != null ? _username : WindowsIdentity.GetCurrent().Name);
+        await writer.WriteByte(0x00);
 
         if (context.HasServerCapability(Capabilities.PLUGIN_AUTH_LENENC_CLIENT_DATA))
         {
-            writer.WriteLength(authData.Length);
-            writer.WriteBytes(authData);
+            await writer.WriteLength(authData.Length);
+            await writer.WriteBytes(authData);
         }
         else if (context.HasServerCapability(Capabilities.SECURE_CONNECTION))
         {
-            writer.WriteByte((byte)authData.Length);
-            writer.WriteBytes(authData);
+            await writer.WriteByte((byte)authData.Length);
+            await writer.WriteBytes(authData);
         }
         else
         {
-            writer.WriteBytes(authData);
-            writer.WriteByte(0x00);
+            await writer.WriteBytes(authData);
+            await writer.WriteByte(0x00);
         }
 
         if (context.HasServerCapability(Capabilities.CONNECT_WITH_DB))
         {
-            writer.WriteString(_database);
-            writer.WriteByte(0x00);
+            await writer.WriteString(_database);
+            await writer.WriteByte(0x00);
         }
 
         if (context.HasServerCapability(Capabilities.PLUGIN_AUTH))
         {
-            writer.WriteString(_authenticationPluginType);
-            writer.WriteByte(0x00);
+            await writer.WriteString(_authenticationPluginType);
+            await writer.WriteByte(0x00);
         }
 
         if (context.HasServerCapability(Capabilities.CONNECT_ATTRS))
-            WriteConnectAttributes(writer, _connectionAttributes, _host);
+            await WriteConnectAttributes(writer, _connectionAttributes, _host);
         //writer.flush();
         return 1;
     }

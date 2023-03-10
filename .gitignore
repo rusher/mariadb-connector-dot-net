@@ -1,2 +1,7 @@
 .idea
-
+benchmarks/bin/
+benchmarks/obj/
+benchmarks/BenchmarkDotNet.Artifacts/
+tests/bin/
+tests/obj/
+Mariadb/obj/

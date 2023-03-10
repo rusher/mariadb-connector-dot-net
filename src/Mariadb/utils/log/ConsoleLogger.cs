@@ -3,15 +3,14 @@ namespace Mariadb.utils.log;
 public class ConsoleLogger : Ilogger
 {
     private static readonly TextWriter _err = Console.Error;
-    private static readonly TextWriter _log = Console.Out;
-    private readonly bool _logDebugLvl;
+    private readonly int _logLvl;
 
     private readonly string _name;
 
-    public ConsoleLogger(string name, bool logDebugLvl)
+    public ConsoleLogger(string name, int logLvl)
     {
         _name = name;
-        _logDebugLvl = logDebugLvl;
+        _logLvl = logLvl;
     }
 
     public string getName()
@@ -21,67 +20,67 @@ public class ConsoleLogger : Ilogger
 
     public bool isTraceEnabled()
     {
-        return _logDebugLvl;
+        return _logLvl == 0;
     }
 
     public void trace(string msg)
     {
-        _log.Write(msg);
+        Console.Write(msg);
     }
 
     public void trace(string msg, Exception e)
     {
-        _log.Write(msg, e);
+        Console.Write(msg, e);
     }
 
     public bool isDebugEnabled()
     {
-        return _logDebugLvl;
+        return _logLvl == 1;
     }
 
     public void debug(string msg)
     {
-        _log.Write(msg);
+        Console.Write(msg);
     }
 
     public void debug(string msg, Exception e)
     {
-        _log.Write(msg, e);
+        Console.Write(msg, e);
     }
 
     public bool isInfoEnabled()
     {
-        return _logDebugLvl;
+        return _logLvl == 2;
     }
 
     public void info(string msg)
     {
-        _log.Write(msg);
+        Console.Write(msg);
     }
 
     public void info(string msg, Exception e)
     {
-        _log.Write(msg, e);
+        Console.Write(msg, e);
     }
 
     public bool isWarnEnabled()
     {
-        return _logDebugLvl;
+        return _logLvl == 3;
     }
 
     public void warn(string msg)
     {
-        _log.Write(msg);
+        Console.Write(msg);
     }
 
     public void warn(string msg, Exception e)
     {
-        _log.Write(msg, e);
+        Console.Write(msg, e);
     }
 
     public bool isErrorEnabled()
     {
-        return true;
+        return _logLvl == 4;
     }
 
     public void error(string msg)

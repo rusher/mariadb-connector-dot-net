@@ -45,38 +45,11 @@ public class PrepareResultPacket : ICompletion, IPrepare
             IColumnDecoder.Decode(new StandardReadableByteBuf(bytes, bytes.Length), true);
     }
 
-    public PrepareResultPacket(IReadableByteBuf buf, IReader reader, IContext context)
+    public PrepareResultPacket(uint statementId, IColumnDecoder[] parameters, IColumnDecoder[] columns)
     {
-        var trace = _logger.isTraceEnabled();
-        buf.ReadByte(); /* skip COM_STMT_PREPARE_OK */
-        StatementId = buf.ReadUnsignedInt();
-        int numColumns = buf.ReadUnsignedShort();
-        int numParams = buf.ReadUnsignedShort();
-        Parameters = new IColumnDecoder[numParams];
-        Columns = new IColumnDecoder[numColumns];
-
-        if (numParams > 0)
-        {
-            for (var i = 0; i < numParams; i++)
-            {
-                // skipping packet, since there is no metadata information.
-                // might change when https://jira.mariadb.org/browse/MDEV-15031 is done
-                Parameters[i] = CONSTANT_PARAMETER;
-                reader.SkipPacket();
-            }
-
-            if (!context.EofDeprecated) reader.SkipPacket();
-        }
-
-        if (numColumns > 0)
-        {
-            for (var i = 0; i < numColumns; i++)
-                Columns[i] =
-                    IColumnDecoder.Decode(
-                        new StandardReadableByteBuf(reader.ReadPacket(trace)),
-                        context.HasClientCapability(Capabilities.EXTENDED_TYPE_INFO));
-            if (!context.EofDeprecated) reader.SkipPacket();
-        }
+        StatementId = statementId;
+        Parameters = parameters;
+        Columns = columns;
     }
 
     public uint StatementId { get; }
@@ -99,5 +72,42 @@ public class PrepareResultPacket : ICompletion, IPrepare
 
     public void UnCache(IClient client)
     {
+    }
+
+    public static async Task<PrepareResultPacket> Decode(CancellationToken cancellationToken, IReadableByteBuf buf,
+        IReader reader, IContext context)
+    {
+        var trace = _logger.isTraceEnabled();
+        buf.ReadByte(); /* skip COM_STMT_PREPARE_OK */
+        var statementId = buf.ReadUnsignedInt();
+        int numColumns = buf.ReadUnsignedShort();
+        int numParams = buf.ReadUnsignedShort();
+        var parameters = new IColumnDecoder[numParams];
+        var columns = new IColumnDecoder[numColumns];
+
+        if (numParams > 0)
+        {
+            for (var i = 0; i < numParams; i++)
+            {
+                // skipping packet, since there is no metadata information.
+                // might change when https://jira.mariadb.org/browse/MDEV-15031 is done
+                parameters[i] = CONSTANT_PARAMETER;
+                await reader.SkipPacket(cancellationToken);
+            }
+
+            if (!context.EofDeprecated) await reader.SkipPacket(cancellationToken);
+        }
+
+        if (numColumns > 0)
+        {
+            for (var i = 0; i < numColumns; i++)
+                columns[i] =
+                    IColumnDecoder.Decode(
+                        new StandardReadableByteBuf(await reader.ReadPacket(cancellationToken, trace)),
+                        context.HasClientCapability(Capabilities.EXTENDED_TYPE_INFO));
+            if (!context.EofDeprecated) await reader.SkipPacket(cancellationToken);
+        }
+
+        return new PrepareResultPacket(statementId, parameters, columns);
     }
 }

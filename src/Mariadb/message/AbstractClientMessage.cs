@@ -3,7 +3,6 @@ using System.Text.RegularExpressions;
 using Mariadb.client;
 using Mariadb.client.impl;
 using Mariadb.client.result;
-using Mariadb.client.result.rowdecoder;
 using Mariadb.client.socket;
 using Mariadb.client.util;
 using Mariadb.message.server;
@@ -13,7 +12,7 @@ namespace Mariadb.message;
 
 public abstract class AbstractClientMessage : IClientMessage
 {
-    public abstract int Encode(IWriter writer, IContext context);
+    public abstract Task<int> Encode(CancellationToken cancellationToken, IWriter writer, IContext context);
     public abstract string Description { get; }
 
     public uint BatchUpdateLength()
@@ -31,7 +30,8 @@ public abstract class AbstractClientMessage : IClientMessage
         return false;
     }
 
-    public ICompletion ReadPacket(
+    public async Task<ICompletion> ReadPacket(
+        CancellationToken cancellationToken,
         MariaDbCommand stmt,
         CommandBehavior behavior,
         IReader reader,
@@ -39,10 +39,10 @@ public abstract class AbstractClientMessage : IClientMessage
         IContext context,
         ExceptionFactory exceptionFactory,
         bool traceEnable,
-        object lockObj,
+        SemaphoreSlim lockObj,
         IClientMessage message)
     {
-        var buf = reader.ReadReusablePacket(traceEnable);
+        var buf = await reader.ReadReusablePacket(cancellationToken, traceEnable);
 
         switch (buf.GetByte())
         {
@@ -112,7 +112,7 @@ public abstract class AbstractClientMessage : IClientMessage
                 // after file send / having an error, sending an empty packet to keep connection state ok
                 writer.WriteEmptyPacket();
                 var completion =
-                    ReadPacket(
+                    await ReadPacket(cancellationToken,
                         stmt,
                         behavior,
                         reader,
@@ -145,29 +145,21 @@ public abstract class AbstractClientMessage : IClientMessage
                     for (var i = 0; i < fieldCount; i++)
                         ci[i] =
                             IColumnDecoder.Decode(
-                                new StandardReadableByteBuf(reader.ReadPacket(traceEnable)),
+                                new StandardReadableByteBuf(await reader.ReadPacket(cancellationToken, traceEnable)),
                                 context.ExtendedInfo);
                 }
 
                 if (canSkipMeta && !skipMeta) stmt.UpdateMeta(ci);
 
                 // intermediate EOF
-                if (!context.EofDeprecated) reader.SkipPacket();
-                if (behavior == CommandBehavior.SequentialAccess)
-                    return new StreamingDataReader(stmt,
-                        BinaryProtocol(),
-                        ci,
-                        reader,
-                        context,
-                        traceEnable,
-                        lockObj, behavior);
-                return new CompleteDataReader(
-                    stmt,
+                if (!context.EofDeprecated) await reader.SkipPacket(cancellationToken);
+                return new StreamingDataReader(stmt,
                     BinaryProtocol(),
                     ci,
                     reader,
                     context,
-                    traceEnable, behavior);
+                    traceEnable,
+                    lockObj, behavior);
         }
     }
 

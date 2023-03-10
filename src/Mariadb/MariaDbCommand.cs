@@ -1,23 +1,21 @@
 using System.Data;
 using System.Data.Common;
 using Mariadb.client.result;
-using Mariadb.client.result.rowdecoder;
 using Mariadb.message;
 using Mariadb.message.client;
 using Mariadb.message.server;
 using Mariadb.utils;
-using Mariadb.utils.constant;
 using Mariadb.utils.exception;
 
 namespace Mariadb;
 
 public class MariaDbCommand : DbCommand
 {
+    private readonly PrepareResultPacket _prepare = null;
     private bool _closed;
     private MariaDbConnection _conn;
     private ICompletion _currResult;
-    private readonly object _lock;
-    private readonly PrepareResultPacket _prepare = null;
+    private SemaphoreSlim _lock;
     private List<ICompletion> _results;
     public Stream LocalInfileInputStream;
 
@@ -30,10 +28,15 @@ public class MariaDbCommand : DbCommand
     protected override DbConnection? DbConnection
     {
         get => _conn;
-        set => _conn = (MariaDbConnection?)value;
+        set
+        {
+            _conn = (MariaDbConnection?)value;
+            _lock = _conn!.Lock;
+        }
     }
 
     public override string CommandText { get; set; }
+
     public override int CommandTimeout { get; set; }
     public override CommandType CommandType { get; set; }
     protected override DbParameterCollection DbParameterCollection { get; }
@@ -52,58 +55,39 @@ public class MariaDbCommand : DbCommand
         throw new NotImplementedException();
     }
 
-    internal void CloseConnection()
+    internal async Task CloseConnection()
     {
-        Close();
-        _conn.Close();
+        await CloseAsync();
+        await _conn.CloseAsync();
     }
 
-    protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
-    {
-        lock (_lock)
-        {
-            try
-            {
-                var cmd = EscapeTimeout(CommandText);
-                _results =
-                    _conn.Client
-                        .Execute(
-                            new QueryPacket(cmd, LocalInfileInputStream),
-                            this,
-                            behavior,
-                            false);
-                _currResult = _results[0];
-                _results.RemoveAt(0);
-                if (_currResult is DbDataReader) return (DbDataReader)_currResult;
-                return new CompleteDataReader(new IColumnDecoder[0], new byte[0][], _conn!.Client!.Context, behavior);
-            }
-            finally
-            {
-                LocalInfileInputStream = null;
-            }
-        }
-    }
-
-    public void Close()
+    public async Task CloseAsync()
     {
         if (!_closed)
         {
             _closed = true;
 
             if (_currResult != null && _currResult is AbstractDataReader)
-                ((AbstractDataReader)_currResult).CloseFromCommandClose(_lock);
+                await ((AbstractDataReader)_currResult).CloseFromCommandClose(_lock);
 
             // close result-set
             if (_results != null && _results.Any())
                 foreach (var completion in _results)
                     if (completion is AbstractDataReader)
-                        ((AbstractDataReader)completion).CloseFromCommandClose(_lock);
+                        await ((AbstractDataReader)completion).CloseFromCommandClose(_lock);
         }
     }
 
     private void CheckNotClosed()
     {
         if (_closed) throw new SqlException("Cannot do an operation on a closed statement");
+        if (_conn == null)
+            throw new SqlException("Cannot do an operation without connection set");
+        if (_conn.State != ConnectionState.Open)
+            throw new SqlException(
+                $"Cannot do an operation without open connection (State is {_conn.State.ToString()})");
+        if (_conn.Client.IsClosed()) throw new SqlException("Cannot do an operation on closed connection");
+        if (CommandText == null) throw new SqlException("CommandText need to be set to be execute");
     }
 
 
@@ -128,11 +112,12 @@ public class MariaDbCommand : DbCommand
         if (_currResult != null && _currResult is AbstractDataReader)
         {
             var result = (AbstractDataReader)_currResult;
-            result.FetchRemaining();
-            if (result.Streaming()
-                && (_conn!.Client!.Context.ServerStatus & ServerStatus.MORE_RESULTS_EXISTS) > 0)
-                _conn!.Client!.ReadStreamingResults(
-                    _results, CommandBehavior.Default);
+            //TODO diego fetch
+            // result.FetchRemaining();
+            // if (result.Streaming()
+            //     && (_conn!.Client!.Context.ServerStatus & ServerStatus.MORE_RESULTS_EXISTS) > 0)
+            //     _conn!.Client!.ReadStreamingResults(
+            //         _results, CommandBehavior.Default);
         }
     }
 
@@ -144,9 +129,56 @@ public class MariaDbCommand : DbCommand
         return sql;
     }
 
+    protected override async Task<DbDataReader> ExecuteDbDataReaderAsync(CommandBehavior behavior,
+        CancellationToken cancellationToken)
+    {
+        await ExecuteInternal(cancellationToken, CommandBehavior.Default);
+        if (_currResult is DbDataReader) return (DbDataReader)_currResult;
+        return new StreamingDataReader(new IColumnDecoder[0], new byte[0], _conn!.Client!.Context, behavior);
+    }
+
+    protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
+    {
+        return ExecuteDbDataReaderAsync(behavior, CancellationToken.None).GetAwaiter().GetResult();
+    }
+
     public override int ExecuteNonQuery()
     {
-        throw new NotImplementedException();
+        return ExecuteNonQueryAsync(CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    public override async Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken)
+    {
+        await ExecuteInternal(cancellationToken, CommandBehavior.Default);
+        if (_currResult is DbDataReader)
+            throw ExceptionFactory()
+                .Create("the given SQL statement produces an unexpected ResultSet object", "HY000");
+        return (int)((OkPacket)_currResult).AffectedRows;
+    }
+
+    private async Task ExecuteInternal(CancellationToken cancellationToken, CommandBehavior behavior)
+    {
+        CheckNotClosed();
+        await _lock.WaitAsync();
+        try
+        {
+            var cmd = EscapeTimeout(CommandText);
+            _results =
+                await _conn.Client
+                    .Execute(
+                        cancellationToken,
+                        new QueryPacket(cmd, LocalInfileInputStream),
+                        this,
+                        behavior,
+                        false);
+            _currResult = _results[0];
+            _results.RemoveAt(0);
+        }
+        finally
+        {
+            LocalInfileInputStream = null;
+            _lock.Release();
+        }
     }
 
     public override object? ExecuteScalar()
@@ -157,5 +189,12 @@ public class MariaDbCommand : DbCommand
     public override void Prepare()
     {
         throw new NotImplementedException();
+    }
+
+    private enum ParsingType
+    {
+        NoParameter,
+        ClientSide,
+        ServerSide
     }
 }

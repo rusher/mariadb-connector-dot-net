@@ -24,8 +24,7 @@ public abstract class AbstractDataReader : DbDataReader, ICompletion
     protected CommandBehavior _behavior;
     protected bool _closed;
     protected IContext _context;
-    protected byte[][] _data;
-    protected int _dataSize;
+    protected byte[] _data;
     protected ExceptionFactory _exceptionFactory;
     protected MutableInt _fieldIndex = new();
     private int _fieldLength;
@@ -38,7 +37,6 @@ public abstract class AbstractDataReader : DbDataReader, ICompletion
 
     protected StandardReadableByteBuf _rowBuf = new(null, 0);
     protected IRowDecoder _rowDecoder;
-    protected int _rowPointer = -1;
     protected MariaDbCommand _statement;
 
     public AbstractDataReader(
@@ -69,7 +67,7 @@ public abstract class AbstractDataReader : DbDataReader, ICompletion
         }
     }
 
-    public AbstractDataReader(IColumnDecoder[] metadataList, byte[][] data, IContext context, CommandBehavior behavior)
+    public AbstractDataReader(IColumnDecoder[] metadataList, byte[] data, IContext context, CommandBehavior behavior)
     {
         _metaDataList = metadataList;
         _maxIndex = _metaDataList.Length;
@@ -78,7 +76,6 @@ public abstract class AbstractDataReader : DbDataReader, ICompletion
         _exceptionFactory = context.ExceptionFactory;
         _context = context;
         _data = data;
-        _dataSize = data.Length;
         _statement = null;
         _behavior = behavior;
     }
@@ -97,9 +94,28 @@ public abstract class AbstractDataReader : DbDataReader, ICompletion
     public override int RecordsAffected { get; }
 
 
-    protected bool ReadNext()
+    public override bool Read()
     {
-        var buf = _reader.ReadPacket(_traceEnable);
+        return ReadAsync(CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    public override async Task<bool> ReadAsync(CancellationToken cancellationToken)
+    {
+        if (await ReadNextPacketAsync(cancellationToken))
+        {
+            SetRow(_data);
+            return true;
+        }
+
+        // all _data are reads and pointer is after last
+        SetNull_rowBuf();
+        return false;
+    }
+
+
+    protected async Task<bool> ReadNextPacketAsync(CancellationToken cancellationToken)
+    {
+        var buf = await _reader.ReadPacket(cancellationToken, _traceEnable);
         switch (buf[0])
         {
             case 0xFF:
@@ -140,25 +156,15 @@ public abstract class AbstractDataReader : DbDataReader, ICompletion
                 }
 
                 // continue reading rows
-                if (_dataSize + 1 > _data.Length) Grow_dataArray();
-                _data[_dataSize++] = buf;
+                _data = buf;
                 break;
 
             default:
-                if (_dataSize + 1 > _data.Length) Grow_dataArray();
-                _data[_dataSize++] = buf;
+                _data = buf;
                 break;
         }
 
         return true;
-    }
-
-    private void Grow_dataArray()
-    {
-        var newCapacity = _data.Length + (_data.Length >> 1);
-        var new_data = new byte[newCapacity][];
-        Array.Copy(_data, 0, new_data, 0, _data.Length);
-        _data = new_data;
     }
 
     private void SetRow(byte[] row)
@@ -172,12 +178,12 @@ public abstract class AbstractDataReader : DbDataReader, ICompletion
         _rowBuf.Buf(null, 0, 0);
     }
 
-    public void Close()
+    public override async Task CloseAsync()
     {
         if (!Loaded)
             try
             {
-                SkipRemaining();
+                await SkipRemaining();
             }
             catch (Exception ioe)
             {
@@ -185,26 +191,30 @@ public abstract class AbstractDataReader : DbDataReader, ICompletion
             }
 
         _closed = true;
-        if (_behavior == CommandBehavior.CloseConnection && _statement != null) _statement.CloseConnection();
+        if (_behavior == CommandBehavior.CloseConnection && _statement != null) await _statement.CloseConnection();
     }
 
-    public void CloseFromCommandClose(object lockObj)
+    public async Task CloseFromCommandClose(SemaphoreSlim lockObj)
     {
-        lock (lockObj)
+        await lockObj.WaitAsync();
+        try
         {
-            FetchRemaining();
+            await FetchRemaining(CancellationToken.None);
             _closed = true;
+        }
+        finally
+        {
+            lockObj.Release();
         }
     }
 
-    internal abstract void FetchRemaining();
-    internal abstract bool Streaming();
+    internal abstract Task FetchRemaining(CancellationToken cancellationToken);
 
-    protected void SkipRemaining()
+    protected async Task SkipRemaining()
     {
         while (true)
         {
-            var buf = _reader.ReadReusablePacket(_traceEnable);
+            var buf = await _reader.ReadReusablePacket(CancellationToken.None, _traceEnable);
             switch (buf.GetUnsignedByte())
             {
                 case 0xFF:
@@ -285,7 +295,12 @@ public abstract class AbstractDataReader : DbDataReader, ICompletion
 
     public override bool GetBoolean(int ordinal)
     {
-        throw new NotImplementedException();
+        CheckIndex(ordinal);
+        _fieldLength =
+            _rowDecoder.SetPosition(
+                ordinal, _fieldIndex, _maxIndex, _rowBuf, _nullBitmap, _metaDataList);
+        if (_fieldLength == NULL_LENGTH) return false;
+        return _rowDecoder.DecodeBoolean(_metaDataList, _fieldIndex, _rowBuf, _fieldLength);
     }
 
     public override byte GetByte(int ordinal)
@@ -355,7 +370,12 @@ public abstract class AbstractDataReader : DbDataReader, ICompletion
 
     public override int GetInt32(int ordinal)
     {
-        throw new NotImplementedException();
+        CheckIndex(ordinal);
+        _fieldLength =
+            _rowDecoder.SetPosition(
+                ordinal, _fieldIndex, _maxIndex, _rowBuf, _nullBitmap, _metaDataList);
+        if (_fieldLength == NULL_LENGTH) return 0;
+        return _rowDecoder.DecodeInt(_metaDataList, _fieldIndex, _rowBuf, _fieldLength);
     }
 
     public override long GetInt64(int ordinal)
@@ -401,19 +421,5 @@ public abstract class AbstractDataReader : DbDataReader, ICompletion
     public override bool NextResult()
     {
         throw new NotImplementedException();
-    }
-
-    public override bool Read()
-    {
-        if (_rowPointer < _dataSize - 1)
-        {
-            SetRow(_data[++_rowPointer]);
-            return true;
-        }
-
-        // all _data are reads and pointer is after last
-        SetNull_rowBuf();
-        _rowPointer = _dataSize;
-        return false;
     }
 }

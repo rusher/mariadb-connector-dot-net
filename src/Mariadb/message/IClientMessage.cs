@@ -8,7 +8,7 @@ namespace Mariadb.message;
 public interface IClientMessage
 {
     public string Description { get; }
-    int Encode(IWriter writer, IContext context);
+    Task<int> Encode(CancellationToken cancellationToken, IWriter writer, IContext context);
 
     uint BatchUpdateLength();
 
@@ -17,7 +17,8 @@ public interface IClientMessage
 
     bool CanSkipMeta();
 
-    ICompletion ReadPacket(
+    Task<ICompletion> ReadPacket(
+        CancellationToken cancellationToken,
         MariaDbCommand stmt,
         CommandBehavior behavior,
         IReader reader,
@@ -25,7 +26,7 @@ public interface IClientMessage
         IContext context,
         ExceptionFactory exceptionFactory,
         bool traceEnable,
-        object lockObj,
+        SemaphoreSlim lockObj,
         IClientMessage message);
 
     Stream GetLocalInfileInputStream();

@@ -112,9 +112,8 @@ internal class Parser
     {
         foreach (var k in keyAliases)
         {
-            var obj = _builder[k];
-            if (obj == null) continue;
-            return obj.ToString();
+            object value;
+            if (_builder.TryGetValue(k, out value)) return value.ToString();
         }
 
         return defaultValue;
@@ -124,10 +123,12 @@ internal class Parser
     {
         foreach (var k in keyAliases)
         {
-            var obj = (string)_builder[k];
-            if (obj == null) continue;
-            T val;
-            if (Enum.TryParse(obj, out val)) return val;
+            object obj;
+            if (_builder.TryGetValue(k, out obj))
+            {
+                T val;
+                if (Enum.TryParse(obj.ToString(), out val)) return val;
+            }
         }
 
         return defaultValue;
@@ -137,15 +138,18 @@ internal class Parser
     {
         foreach (var k in keyAliases)
         {
-            var obj = _builder[k];
-            if (obj == null) continue;
-            if (obj is uint ui) return ui;
-            if (obj is int i) return (uint)i;
-            if (obj is string str)
-                if (uint.TryParse(str, out var parseRes))
-                    return parseRes;
+            object obj;
+            if (_builder.TryGetValue(k, out obj))
+            {
+                if (obj == null) continue;
+                if (obj is uint ui) return ui;
+                if (obj is int i) return (uint)i;
+                if (obj is string str)
+                    if (uint.TryParse(str, out var parseRes))
+                        return parseRes;
 
-            throw new ArgumentException($"Parameter {k} has wrong int32 value '{obj}'.");
+                throw new ArgumentException($"Parameter {k} has wrong int32 value '{obj}'.");
+            }
         }
 
         return defaultValue;
@@ -155,15 +159,18 @@ internal class Parser
     {
         foreach (var k in keyAliases)
         {
-            var obj = _builder[k];
-            if (obj == null) continue;
-            if (obj is uint ui) return ui;
-            if (obj is int i) return (uint)i;
-            if (obj is string str)
-                if (uint.TryParse(str, out var parseRes))
-                    return parseRes;
+            object obj;
+            if (_builder.TryGetValue(k, out obj))
+            {
+                if (obj == null) continue;
+                if (obj is uint ui) return ui;
+                if (obj is int i) return (uint)i;
+                if (obj is string str)
+                    if (uint.TryParse(str, out var parseRes))
+                        return parseRes;
 
-            throw new ArgumentException($"Parameter {k} has wrong int32 value '{obj}'.");
+                throw new ArgumentException($"Parameter {k} has wrong int32 value '{obj}'.");
+            }
         }
 
         return defaultValue;
@@ -173,14 +180,17 @@ internal class Parser
     {
         foreach (var k in keyAliases)
         {
-            var obj = _builder[k];
-            if (obj == null) continue;
-            if (obj is bool b) return b;
-            if (obj is string str)
-                if (bool.TryParse(str, out var parseRes))
-                    return parseRes;
+            object obj;
+            if (_builder.TryGetValue(k, out obj))
+            {
+                if (obj == null) continue;
+                if (obj is bool b) return b;
+                if (obj is string str)
+                    if (bool.TryParse(str, out var parseRes))
+                        return parseRes;
 
-            throw new ArgumentException($"Parameter {k} has wrong boolean value '{obj}'.");
+                throw new ArgumentException($"Parameter {k} has wrong boolean value '{obj}'.");
+            }
         }
 
         return defaultValue;

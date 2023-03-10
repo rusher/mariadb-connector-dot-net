@@ -1,12 +1,12 @@
+using System.Globalization;
 using Mariadb.client.util;
 using Mariadb.message.server;
-using Mariadb.utils.exception;
 
 namespace Mariadb.client.decoder;
 
-public class BigDecimalColumn : ColumnDefinitionPacket, IColumnDecoder
+public class StringColumn : ColumnDefinitionPacket, IColumnDecoder
 {
-    public BigDecimalColumn(
+    public StringColumn(
         IReadableByteBuf buf,
         int charset,
         long length,
@@ -20,24 +20,21 @@ public class BigDecimalColumn : ColumnDefinitionPacket, IColumnDecoder
     {
     }
 
-    public override int GetPrecision()
-    {
-        // DECIMAL and OLDDECIMAL are  "exact" fixed-point number.
-        // so :
-        // - if is signed, 1 byte is saved for sign
-        // - if decimal > 0, one byte more for dot
-        if (IsSigned()) return (int)(_columnLength - (_decimals > 0 ? 2 : 1));
-        return (int)(_columnLength - (_decimals > 0 ? 1 : 0));
-    }
-
     public object GetDefaultText(Configuration conf, IReadableByteBuf buf, int length)
     {
-        return buf.ReadAscii(length);
+        if (IsBinary())
+        {
+            var arr = new byte[length];
+            buf.ReadBytes(arr);
+            return arr;
+        }
+
+        return buf.ReadString(length);
     }
 
     public object GetDefaultBinary(Configuration conf, IReadableByteBuf buf, int length)
     {
-        return buf.ReadAscii(length);
+        return GetDefaultText(conf, buf, length);
     }
 
     public bool DecodeBooleanText(IReadableByteBuf buf, int length)
@@ -47,38 +44,36 @@ public class BigDecimalColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public bool DecodeBooleanBinary(IReadableByteBuf buf, int length)
     {
-        return DecodeBooleanText(buf, length);
+        return buf.ReadByte() != 0;
     }
 
     public byte DecodeByteText(IReadableByteBuf buf, int length)
     {
-        var str = buf.ReadAscii(length);
-        byte b;
-        if (byte.TryParse(str, out b)) return b;
-        throw new ArgumentException($"DECIMAL value '{str}' cannot be parse as byte value.");
+        if (length > 0) throw new ArgumentException("byte overflow");
+        return buf.ReadByte();
     }
 
     public byte DecodeByteBinary(IReadableByteBuf buf, int length)
     {
-        return DecodeByteText(buf, length);
+        return buf.ReadByte();
     }
 
     public string DecodeStringText(IReadableByteBuf buf, int length)
     {
-        return buf.ReadAscii(length);
+        return buf.ReadString(length);
     }
 
     public string DecodeStringBinary(IReadableByteBuf buf, int length)
     {
-        return buf.ReadAscii(length);
+        return buf.ReadString(length);
     }
 
     public short DecodeShortText(IReadableByteBuf buf, int length)
     {
-        var str = buf.ReadAscii(length);
-        short b;
-        if (short.TryParse(str, out b)) return b;
-        throw new ArgumentException($"DECIMAL value '{str}' cannot be parse as short value.");
+        var str = buf.ReadString(length);
+        short s;
+        if (short.TryParse(str, out s)) return s;
+        throw new ArgumentException($"value '{str}' cannot be decoded as short");
     }
 
     public short DecodeShortBinary(IReadableByteBuf buf, int length)
@@ -88,10 +83,10 @@ public class BigDecimalColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public int DecodeIntText(IReadableByteBuf buf, int length)
     {
-        var str = buf.ReadAscii(length);
-        int b;
-        if (int.TryParse(str, out b)) return b;
-        throw new ArgumentException($"DECIMAL value '{str}' cannot be parse as int value.");
+        var str = buf.ReadString(length);
+        int s;
+        if (int.TryParse(str, out s)) return s;
+        throw new ArgumentException($"value '{str}' cannot be decoded as int");
     }
 
     public int DecodeIntBinary(IReadableByteBuf buf, int length)
@@ -101,10 +96,10 @@ public class BigDecimalColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public long DecodeLongText(IReadableByteBuf buf, int length)
     {
-        var str = buf.ReadAscii(length);
-        long b;
-        if (long.TryParse(str, out b)) return b;
-        throw new ArgumentException($"DECIMAL value '{str}' cannot be parse as long value.");
+        var str = buf.ReadString(length);
+        long s;
+        if (long.TryParse(str, out s)) return s;
+        throw new ArgumentException($"value '{str}' cannot be decoded as long");
     }
 
     public long DecodeLongBinary(IReadableByteBuf buf, int length)
@@ -114,10 +109,10 @@ public class BigDecimalColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public float DecodeFloatText(IReadableByteBuf buf, int length)
     {
-        var str = buf.ReadAscii(length);
-        float b;
-        if (float.TryParse(str, out b)) return b;
-        throw new ArgumentException($"DECIMAL value '{str}' cannot be parse as float value.");
+        var str = buf.ReadString(length);
+        float s;
+        if (float.TryParse(str, out s)) return s;
+        throw new ArgumentException($"value '{str}' cannot be decoded as float");
     }
 
     public float DecodeFloatBinary(IReadableByteBuf buf, int length)
@@ -127,10 +122,10 @@ public class BigDecimalColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public double DecodeDoubleText(IReadableByteBuf buf, int length)
     {
-        var str = buf.ReadAscii(length);
-        double b;
-        if (double.TryParse(str, out b)) return b;
-        throw new ArgumentException($"DECIMAL value '{str}' cannot be parse as double value.");
+        var str = buf.ReadString(length);
+        double s;
+        if (double.TryParse(str, out s)) return s;
+        throw new ArgumentException($"value '{str}' cannot be decoded as double");
     }
 
     public double DecodeDoubleBinary(IReadableByteBuf buf, int length)
@@ -140,22 +135,24 @@ public class BigDecimalColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public DateTime DecodeDateTimeText(IReadableByteBuf buf, int length)
     {
-        buf.Skip(length);
-        throw new DbDataException($"Data type {_dataType} cannot be decoded as Date");
+        var str = buf.ReadString(length);
+        DateTime s;
+        if (DateTime.TryParseExact(str, "yyyy-MM-dd hh:mm:ss.ffffff", CultureInfo.InvariantCulture, DateTimeStyles.None,
+                out s)) return s;
+        throw new ArgumentException($"value '{str}' cannot be decoded as double");
     }
 
     public DateTime DecodeDateTimeBinary(IReadableByteBuf buf, int length)
     {
-        buf.Skip(length);
-        throw new DbDataException($"Data type {_dataType} cannot be decoded as Date");
+        return DecodeDateTimeText(buf, length);
     }
 
     public decimal DecodeDecimalText(IReadableByteBuf buf, int length)
     {
-        var str = buf.ReadAscii(length);
-        decimal b;
-        if (decimal.TryParse(str, out b)) return b;
-        throw new ArgumentException($"DECIMAL value '{str}' cannot be parse as decimal value.");
+        var str = buf.ReadString(length);
+        decimal s;
+        if (decimal.TryParse(str, out s)) return s;
+        throw new ArgumentException($"value '{str}' cannot be decoded as decimal");
     }
 
     public decimal DecodeDecimalBinary(IReadableByteBuf buf, int length)
@@ -165,13 +162,14 @@ public class BigDecimalColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public Guid DecodeGuidText(IReadableByteBuf buf, int length)
     {
-        buf.Skip(length);
-        throw new DbDataException($"Data type {_dataType} cannot be decoded as Guid");
+        var str = buf.ReadString(length);
+        Guid s;
+        if (Guid.TryParse(str, out s)) return s;
+        throw new ArgumentException($"value '{str}' cannot be decoded as Guid");
     }
 
     public Guid DecodeGuidBinary(IReadableByteBuf buf, int length)
     {
-        buf.Skip(length);
-        throw new DbDataException($"Data type {_dataType} cannot be decoded as Guid");
+        return DecodeGuidText(buf, length);
     }
 }

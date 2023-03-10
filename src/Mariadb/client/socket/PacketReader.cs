@@ -1,4 +1,3 @@
-using System.Net.Sockets;
 using Mariadb.client.impl;
 using Mariadb.client.util;
 using Mariadb.utils.log;
@@ -10,36 +9,36 @@ public class PacketReader : IReader
     private const int REUSABLE_BUFFER_LENGTH = 1024;
     private const int MAX_PACKET_SIZE = 0xffffff;
     private static readonly Ilogger logger = Loggers.getLogger("PacketReader");
+
+    private readonly byte[] _header = new byte[4];
     private readonly uint _maxQuerySizeToLog;
 
+    private readonly IReadableByteBuf _readBuf = new StandardReadableByteBuf(null, 0);
+    private readonly byte[] _reusableArray = new byte[REUSABLE_BUFFER_LENGTH];
+
     private readonly MutableByte _sequence;
-    private readonly Socket _socket;
-
-    private readonly byte[] header = new byte[4];
-
-    private readonly IReadableByteBuf readBuf = new StandardReadableByteBuf(null, 0);
-    private readonly byte[] reusableArray = new byte[REUSABLE_BUFFER_LENGTH];
+    private readonly Stream _stream;
     private string _serverThreadLog = "";
 
-    public PacketReader(Socket socket, Configuration conf, MutableByte sequence)
+    public PacketReader(Stream stream, Configuration conf, MutableByte sequence)
     {
-        _socket = socket;
+        _stream = stream;
         _maxQuerySizeToLog = conf.MaxQuerySizeToLog;
         _sequence = sequence;
     }
 
     public IReadableByteBuf ReadableBufFromArray(byte[] buf)
     {
-        readBuf.Buf(buf, buf.Length, 0);
-        return readBuf;
+        _readBuf.Buf(buf, buf.Length, 0);
+        return _readBuf;
     }
 
-    public IReadableByteBuf ReadReusablePacket()
+    public async Task<IReadableByteBuf> ReadReusablePacket(CancellationToken cancellationToken)
     {
-        return ReadReusablePacket(logger.isTraceEnabled());
+        return await ReadReusablePacket(cancellationToken, logger.isTraceEnabled());
     }
 
-    public IReadableByteBuf ReadReusablePacket(bool traceEnable)
+    public async Task<IReadableByteBuf> ReadReusablePacket(CancellationToken cancellationToken, bool traceEnable)
     {
         // ***************************************************
         // Read 4 byte header
@@ -48,7 +47,7 @@ public class PacketReader : IReader
         var off = 0;
         do
         {
-            var count = _socket.Receive(header, off, remaining, SocketFlags.Partial);
+            var count = await _stream.ReadAsync(_header, off, remaining, cancellationToken);
             if (count < 0)
                 throw new IOException(
                     "unexpected end of stream, read "
@@ -59,13 +58,13 @@ public class PacketReader : IReader
         } while (remaining > 0);
 
         var lastPacketLength =
-            (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
-        _sequence.Value = header[3];
+            (_header[0] & 0xff) + ((_header[1] & 0xff) << 8) + ((_header[2] & 0xff) << 16);
+        _sequence.Value = _header[3];
 
         // prepare array
         byte[] rawBytes;
         if (lastPacketLength < REUSABLE_BUFFER_LENGTH)
-            rawBytes = reusableArray;
+            rawBytes = _reusableArray;
         else
             rawBytes = new byte[lastPacketLength];
 
@@ -76,7 +75,7 @@ public class PacketReader : IReader
         off = 0;
         do
         {
-            var count = _socket.Receive(rawBytes, off, remaining, SocketFlags.Partial);
+            var count = await _stream.ReadAsync(rawBytes, off, remaining, cancellationToken);
             if (count < 0)
                 throw new IOException(
                     "unexpected end of stream, read "
@@ -90,13 +89,13 @@ public class PacketReader : IReader
 
         if (traceEnable)
             logger.trace(
-                $"read: {_serverThreadLog}\n{LoggerHelper.Hex(header, rawBytes, 0, lastPacketLength, _maxQuerySizeToLog)}");
+                $"read: {_serverThreadLog}\n{LoggerHelper.Hex(_header, rawBytes, 0, lastPacketLength, _maxQuerySizeToLog)}");
 
-        readBuf.Buf(rawBytes, lastPacketLength, 0);
-        return readBuf;
+        _readBuf.Buf(rawBytes, lastPacketLength, 0);
+        return _readBuf;
     }
 
-    public byte[] ReadPacket(bool traceEnable)
+    public async Task<byte[]> ReadPacket(CancellationToken cancellationToken, bool traceEnable)
     {
         // ***************************************************
         // Read 4 byte header
@@ -105,7 +104,7 @@ public class PacketReader : IReader
         var off = 0;
         do
         {
-            var count = _socket.Receive(header, off, remaining, SocketFlags.Partial);
+            var count = await _stream.ReadAsync(_header, off, remaining, cancellationToken);
             if (count < 0)
                 throw new IOException(
                     "unexpected end of stream, read "
@@ -116,7 +115,7 @@ public class PacketReader : IReader
         } while (remaining > 0);
 
         var lastPacketLength =
-            (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
+            (_header[0] & 0xff) + ((_header[1] & 0xff) << 8) + ((_header[2] & 0xff) << 16);
 
         // prepare array
         var rawBytes = new byte[lastPacketLength];
@@ -128,7 +127,7 @@ public class PacketReader : IReader
         off = 0;
         do
         {
-            var count = _socket.Receive(rawBytes, off, remaining, SocketFlags.Partial);
+            var count = await _stream.ReadAsync(rawBytes, off, remaining, cancellationToken);
             if (count < 0)
                 throw new IOException(
                     "unexpected end of stream, read "
@@ -142,7 +141,7 @@ public class PacketReader : IReader
 
         if (traceEnable)
             logger.trace(
-                $"read: {_serverThreadLog}\n{LoggerHelper.Hex(header, rawBytes, 0, lastPacketLength, _maxQuerySizeToLog)}");
+                $"read: {_serverThreadLog}\n{LoggerHelper.Hex(_header, rawBytes, 0, lastPacketLength, _maxQuerySizeToLog)}");
 
         // ***************************************************
         // In case content length is big, content will be separate in many 16Mb packets
@@ -156,13 +155,13 @@ public class PacketReader : IReader
                 off = 0;
                 do
                 {
-                    var count = _socket.Receive(header, off, remaining, SocketFlags.Partial);
+                    var count = await _stream.ReadAsync(_header, off, remaining, cancellationToken);
                     if (count < 0) throw new IOException("unexpected end of stream, read " + off + " bytes from 4");
                     remaining -= count;
                     off += count;
                 } while (remaining > 0);
 
-                packetLength = (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
+                packetLength = (_header[0] & 0xff) + ((_header[1] & 0xff) << 8) + ((_header[2] & 0xff) << 16);
 
                 var currentBufLength = rawBytes.Length;
                 var newRawBytes = new byte[currentBufLength + packetLength];
@@ -176,7 +175,7 @@ public class PacketReader : IReader
                 off = currentBufLength;
                 do
                 {
-                    var count = _socket.Receive(rawBytes, off, remaining, SocketFlags.Partial);
+                    var count = await _stream.ReadAsync(rawBytes, off, remaining, cancellationToken);
                     if (count < 0)
                         throw new IOException(
                             "unexpected end of stream, read "
@@ -189,7 +188,7 @@ public class PacketReader : IReader
 
                 if (traceEnable)
                     logger.trace(
-                        $"read: {_serverThreadLog}\n{LoggerHelper.Hex(header, rawBytes, currentBufLength, packetLength, _maxQuerySizeToLog)}");
+                        $"read: {_serverThreadLog}\n{LoggerHelper.Hex(_header, rawBytes, currentBufLength, packetLength, _maxQuerySizeToLog)}");
 
                 lastPacketLength += packetLength;
             } while (packetLength == MAX_PACKET_SIZE);
@@ -198,11 +197,11 @@ public class PacketReader : IReader
         return rawBytes;
     }
 
-    public void SkipPacket()
+    public async Task SkipPacket(CancellationToken cancellationToken)
     {
         if (logger.isTraceEnabled())
         {
-            ReadReusablePacket(logger.isTraceEnabled());
+            await ReadReusablePacket(cancellationToken, logger.isTraceEnabled());
             return;
         }
 
@@ -213,7 +212,7 @@ public class PacketReader : IReader
         var off = 0;
         do
         {
-            var count = _socket.Receive(header, off, remaining, SocketFlags.Partial);
+            var count = await _stream.ReadAsync(_header, off, remaining, cancellationToken);
             if (count < 0)
                 throw new IOException(
                     "unexpected end of stream, read "
@@ -224,13 +223,13 @@ public class PacketReader : IReader
         } while (remaining > 0);
 
         var lastPacketLength =
-            (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
+            (_header[0] & 0xff) + ((_header[1] & 0xff) << 8) + ((_header[2] & 0xff) << 16);
 
         remaining = lastPacketLength;
         // skipping 
         do
         {
-            var count = _socket.Receive(header, 0, Math.Min(4, remaining), SocketFlags.Partial);
+            var count = await _stream.ReadAsync(_header, 0, Math.Min(4, remaining), cancellationToken);
             if (count < 0)
                 throw new IOException(
                     "unexpected end of stream, skipping bytes (socket was closed by server)");
@@ -250,19 +249,19 @@ public class PacketReader : IReader
                 off = 0;
                 do
                 {
-                    var count = _socket.Receive(header, off, remaining, SocketFlags.Partial);
+                    var count = await _stream.ReadAsync(_header, off, remaining, cancellationToken);
                     if (count < 0) throw new IOException("unexpected end of stream, read " + off + " bytes from 4");
                     remaining -= count;
                     off += count;
                 } while (remaining > 0);
 
-                packetLength = (header[0] & 0xff) + ((header[1] & 0xff) << 8) + ((header[2] & 0xff) << 16);
+                packetLength = (_header[0] & 0xff) + ((_header[1] & 0xff) << 8) + ((_header[2] & 0xff) << 16);
 
                 remaining = packetLength;
                 // skipping 
                 do
                 {
-                    var count = _socket.Receive(header, 0, Math.Min(4, remaining), SocketFlags.Partial);
+                    var count = await _stream.ReadAsync(_header, 0, Math.Min(4, remaining), cancellationToken);
                     if (count < 0)
                         throw new IOException(
                             "unexpected end of stream, skipping bytes (socket was closed by server)");
@@ -282,7 +281,7 @@ public class PacketReader : IReader
 
     public void Close()
     {
-        _socket.Close();
+        _stream.Close();
     }
 
     public void SetServerThreadId(long? serverThreadId, HostAddress hostAddress)

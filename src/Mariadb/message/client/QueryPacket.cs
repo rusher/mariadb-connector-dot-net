@@ -22,12 +22,12 @@ public class QueryPacket : AbstractClientMessage
         return 1;
     }
 
-    public override int Encode(IWriter writer, IContext context)
+    public override async Task<int> Encode(CancellationToken cancellationToken, IWriter writer, IContext context)
     {
-        writer.InitPacket();
-        writer.WriteByte(0x03);
-        writer.WriteString(Sql);
-        writer.Flush();
+        writer.InitPacket(cancellationToken);
+        await writer.WriteByte(0x03);
+        await writer.WriteString(Sql);
+        await writer.Flush();
         return 1;
     }
 

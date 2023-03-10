@@ -71,56 +71,90 @@ public class GuidColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public short DecodeShortBinary(IReadableByteBuf buf, int length)
     {
+        buf.Skip(length);
         throw new ArgumentException("Data type UUID cannot be decoded as short");
     }
 
     public int DecodeIntText(IReadableByteBuf buf, int length)
     {
+        buf.Skip(length);
         throw new ArgumentException("Data type UUID cannot be decoded as int");
     }
 
     public int DecodeIntBinary(IReadableByteBuf buf, int length)
     {
+        buf.Skip(length);
         throw new ArgumentException("Data type UUID cannot be decoded as int");
     }
 
     public long DecodeLongText(IReadableByteBuf buf, int length)
     {
+        buf.Skip(length);
         throw new ArgumentException("Data type UUID cannot be decoded as long");
     }
 
     public long DecodeLongBinary(IReadableByteBuf buf, int length)
     {
+        buf.Skip(length);
         throw new ArgumentException("Data type UUID cannot be decoded as long");
     }
 
     public float DecodeFloatText(IReadableByteBuf buf, int length)
     {
+        buf.Skip(length);
         throw new ArgumentException("Data type UUID cannot be decoded as float");
     }
 
     public float DecodeFloatBinary(IReadableByteBuf buf, int length)
     {
+        buf.Skip(length);
         throw new ArgumentException("Data type UUID cannot be decoded as float");
     }
 
     public double DecodeDoubleText(IReadableByteBuf buf, int length)
     {
+        buf.Skip(length);
         throw new ArgumentException("Data type UUID cannot be decoded as double");
     }
 
     public double DecodeDoubleBinary(IReadableByteBuf buf, int length)
     {
+        buf.Skip(length);
         throw new ArgumentException("Data type UUID cannot be decoded as double");
     }
 
     public DateTime DecodeDateTimeText(IReadableByteBuf buf, int length)
     {
+        buf.Skip(length);
         throw new ArgumentException("Data type UUID cannot be decoded as DateTime");
     }
 
     public DateTime DecodeDateTimeBinary(IReadableByteBuf buf, int length)
     {
+        buf.Skip(length);
         throw new ArgumentException("Data type UUID cannot be decoded as DateTime");
+    }
+
+    public decimal DecodeDecimalText(IReadableByteBuf buf, int length)
+    {
+        buf.Skip(length);
+        throw new ArgumentException("Data type UUID cannot be decoded as decimal");
+    }
+
+    public decimal DecodeDecimalBinary(IReadableByteBuf buf, int length)
+    {
+        return DecodeDecimalText(buf, length);
+    }
+
+    public Guid DecodeGuidText(IReadableByteBuf buf, int length)
+    {
+        var str = buf.ReadAscii(length);
+        return new Guid(str);
+    }
+
+    public Guid DecodeGuidBinary(IReadableByteBuf buf, int length)
+    {
+        var str = buf.ReadAscii(length);
+        return new Guid(str);
     }
 }

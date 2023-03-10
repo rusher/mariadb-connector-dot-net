@@ -4,9 +4,9 @@ using Mariadb.utils.exception;
 
 namespace Mariadb.client.decoder;
 
-public class BigDecimalColumn : ColumnDefinitionPacket, IColumnDecoder
+public class UnsignedInt32Column : ColumnDefinitionPacket, IColumnDecoder
 {
-    public BigDecimalColumn(
+    public UnsignedInt32Column(
         IReadableByteBuf buf,
         int charset,
         long length,
@@ -20,24 +20,14 @@ public class BigDecimalColumn : ColumnDefinitionPacket, IColumnDecoder
     {
     }
 
-    public override int GetPrecision()
-    {
-        // DECIMAL and OLDDECIMAL are  "exact" fixed-point number.
-        // so :
-        // - if is signed, 1 byte is saved for sign
-        // - if decimal > 0, one byte more for dot
-        if (IsSigned()) return (int)(_columnLength - (_decimals > 0 ? 2 : 1));
-        return (int)(_columnLength - (_decimals > 0 ? 1 : 0));
-    }
-
     public object GetDefaultText(Configuration conf, IReadableByteBuf buf, int length)
     {
-        return buf.ReadAscii(length);
+        return (int)buf.Atoll(length);
     }
 
     public object GetDefaultBinary(Configuration conf, IReadableByteBuf buf, int length)
     {
-        return buf.ReadAscii(length);
+        return buf.ReadUnsignedInt();
     }
 
     public bool DecodeBooleanText(IReadableByteBuf buf, int length)
@@ -47,20 +37,22 @@ public class BigDecimalColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public bool DecodeBooleanBinary(IReadableByteBuf buf, int length)
     {
-        return DecodeBooleanText(buf, length);
+        return buf.ReadUnsignedInt() != 0;
     }
 
     public byte DecodeByteText(IReadableByteBuf buf, int length)
     {
-        var str = buf.ReadAscii(length);
-        byte b;
-        if (byte.TryParse(str, out b)) return b;
-        throw new ArgumentException($"DECIMAL value '{str}' cannot be parse as byte value.");
+        var result = buf.Atoll(length);
+        if ((byte)result != result) throw new ArgumentException("byte overflow");
+        return (byte)result;
     }
 
     public byte DecodeByteBinary(IReadableByteBuf buf, int length)
     {
-        return DecodeByteText(buf, length);
+        long result = buf.ReadUnsignedInt();
+
+        if ((byte)result != result) throw new ArgumentException("byte overflow");
+        return (byte)result;
     }
 
     public string DecodeStringText(IReadableByteBuf buf, int length)
@@ -68,74 +60,65 @@ public class BigDecimalColumn : ColumnDefinitionPacket, IColumnDecoder
         return buf.ReadAscii(length);
     }
 
-    public string DecodeStringBinary(IReadableByteBuf buf, int length)
+    public string? DecodeStringBinary(IReadableByteBuf buf, int length)
     {
-        return buf.ReadAscii(length);
+        return buf.ReadUnsignedInt().ToString();
     }
 
     public short DecodeShortText(IReadableByteBuf buf, int length)
     {
-        var str = buf.ReadAscii(length);
-        short b;
-        if (short.TryParse(str, out b)) return b;
-        throw new ArgumentException($"DECIMAL value '{str}' cannot be parse as short value.");
+        var result = buf.Atoll(length);
+        if ((short)result != result) throw new ArgumentException("Short overflow");
+        return (short)result;
     }
 
     public short DecodeShortBinary(IReadableByteBuf buf, int length)
     {
-        return DecodeShortText(buf, length);
+        var result = buf.ReadUnsignedInt();
+        if ((short)result != result) throw new ArgumentException("Short overflow");
+        return (short)result;
     }
 
     public int DecodeIntText(IReadableByteBuf buf, int length)
     {
-        var str = buf.ReadAscii(length);
-        int b;
-        if (int.TryParse(str, out b)) return b;
-        throw new ArgumentException($"DECIMAL value '{str}' cannot be parse as int value.");
+        return (int)buf.Atoll(length);
     }
 
     public int DecodeIntBinary(IReadableByteBuf buf, int length)
     {
-        return DecodeIntText(buf, length);
+        var result = buf.ReadUnsignedInt();
+        if ((int)result != result) throw new ArgumentException("int overflow");
+        return (int)result;
     }
 
     public long DecodeLongText(IReadableByteBuf buf, int length)
     {
-        var str = buf.ReadAscii(length);
-        long b;
-        if (long.TryParse(str, out b)) return b;
-        throw new ArgumentException($"DECIMAL value '{str}' cannot be parse as long value.");
+        return buf.Atoll(length);
     }
 
     public long DecodeLongBinary(IReadableByteBuf buf, int length)
     {
-        return DecodeLongText(buf, length);
+        return buf.ReadUnsignedInt();
     }
 
     public float DecodeFloatText(IReadableByteBuf buf, int length)
     {
-        var str = buf.ReadAscii(length);
-        float b;
-        if (float.TryParse(str, out b)) return b;
-        throw new ArgumentException($"DECIMAL value '{str}' cannot be parse as float value.");
+        return float.Parse(buf.ReadAscii(length));
     }
 
     public float DecodeFloatBinary(IReadableByteBuf buf, int length)
     {
-        return DecodeFloatText(buf, length);
+        return buf.ReadUnsignedInt();
     }
 
     public double DecodeDoubleText(IReadableByteBuf buf, int length)
     {
-        var str = buf.ReadAscii(length);
-        double b;
-        if (double.TryParse(str, out b)) return b;
-        throw new ArgumentException($"DECIMAL value '{str}' cannot be parse as double value.");
+        return double.Parse(buf.ReadAscii(length));
     }
 
     public double DecodeDoubleBinary(IReadableByteBuf buf, int length)
     {
-        return DecodeDoubleText(buf, length);
+        return buf.ReadUnsignedInt();
     }
 
     public DateTime DecodeDateTimeText(IReadableByteBuf buf, int length)
@@ -152,15 +135,12 @@ public class BigDecimalColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public decimal DecodeDecimalText(IReadableByteBuf buf, int length)
     {
-        var str = buf.ReadAscii(length);
-        decimal b;
-        if (decimal.TryParse(str, out b)) return b;
-        throw new ArgumentException($"DECIMAL value '{str}' cannot be parse as decimal value.");
+        return buf.Atoll(length);
     }
 
     public decimal DecodeDecimalBinary(IReadableByteBuf buf, int length)
     {
-        return DecodeDecimalText(buf, length);
+        return buf.ReadUnsignedInt();
     }
 
     public Guid DecodeGuidText(IReadableByteBuf buf, int length)

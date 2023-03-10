@@ -14,12 +14,12 @@ public class ClosePreparePacket : AbstractClientMessage
 
     public override string Description => "Closing PREPARE " + _statementId;
 
-    public override int Encode(IWriter writer, IContext context)
+    public override async Task<int> Encode(CancellationToken cancellationToken, IWriter writer, IContext context)
     {
-        writer.InitPacket();
-        writer.WriteByte(0x19);
-        writer.WriteUInt(_statementId);
-        writer.Flush();
+        writer.InitPacket(cancellationToken);
+        await writer.WriteByte(0x19);
+        await writer.WriteUInt(_statementId);
+        await writer.Flush();
         return 0;
     }
 }

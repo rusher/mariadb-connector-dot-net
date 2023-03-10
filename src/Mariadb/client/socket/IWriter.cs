@@ -2,24 +2,24 @@ namespace Mariadb.client.socket;
 
 public interface IWriter
 {
-    void WriteByte(int value);
-    void WriteShort(short value);
-    void WriteInt(int value);
-    void WriteUInt(uint value);
-    void WriteLong(long value);
-    void WriteDouble(double value);
-    void WriteFloat(float value);
-    void WriteBytes(byte[] arr);
+    Task WriteByte(int value);
+    Task WriteShort(short value);
+    Task WriteInt(int value);
+    Task WriteUInt(uint value);
+    Task WriteLong(long value);
+    Task WriteDouble(double value);
+    Task WriteFloat(float value);
+    Task WriteBytes(byte[] arr);
     void WriteBytesAtPos(byte[] arr, int pos);
-    void WriteBytes(byte[] arr, int off, int len);
-    void WriteLength(long length);
-    void WriteAscii(string str);
-    void WriteString(string str);
-    void WriteStringEscaped(string str, bool noBackslashEscapes);
-    void WriteBytesEscaped(byte[] bytes, int len, bool noBackslashEscapes);
-    void WriteEmptyPacket();
-    void Flush();
-    void FlushPipeline();
+    Task WriteBytes(byte[] arr, int off, int len);
+    Task WriteLength(long length);
+    Task WriteAscii(string str);
+    Task WriteString(string str);
+    Task WriteStringEscaped(string str, bool noBackslashEscapes);
+    Task WriteBytesEscaped(byte[] bytes, int len, bool noBackslashEscapes);
+    Task WriteEmptyPacket();
+    Task Flush();
+    Task FlushPipeline();
     bool ThrowMaxAllowedLength(int length);
     long GetCmdLength();
     void PermitTrace(bool permitTrace);
@@ -27,9 +27,9 @@ public interface IWriter
     void Mark();
     bool IsMarked();
     bool HasFlushed();
-    void FlushBufferStopAtMark();
+    Task FlushBufferStopAtMark();
     bool BufIsDataAfterMark();
     byte[] ResetMark();
-    void InitPacket();
+    void InitPacket(CancellationToken cancellationToken);
     void Close();
 }

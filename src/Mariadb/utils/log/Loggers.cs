@@ -26,7 +26,7 @@ public class Loggers
     {
         public Ilogger getLogger(string name)
         {
-            return new ConsoleLogger(name, true);
+            return new ConsoleLogger(name, 2);
         }
     }
 }

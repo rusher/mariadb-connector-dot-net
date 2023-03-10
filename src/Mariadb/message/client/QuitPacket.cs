@@ -12,11 +12,11 @@ public class QuitPacket : AbstractClientMessage
 
     public override string Description => "QUIT";
 
-    public override int Encode(IWriter writer, IContext context)
+    public override async Task<int> Encode(CancellationToken cancellationToken, IWriter writer, IContext context)
     {
-        writer.InitPacket();
-        writer.WriteByte(0x01);
-        writer.Flush();
+        writer.InitPacket(cancellationToken);
+        await writer.WriteByte(0x01);
+        await writer.Flush();
         return 0;
     }
 }

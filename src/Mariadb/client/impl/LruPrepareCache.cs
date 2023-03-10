@@ -4,8 +4,8 @@ namespace Mariadb.client.impl;
 
 public class LruPrepareCache : IPrepareCache
 {
-    private readonly int _capacity;
     private readonly Dictionary<string, Node> _cacheWithData;
+    private readonly int _capacity;
     private readonly IClient _client;
     private Node _head;
     private Node _tail;

@@ -8,5 +8,5 @@ public interface IAuthenticationPlugin
 {
     string Type { get; }
     void Initialize(string authenticationData, byte[] seed, Configuration conf);
-    IReadableByteBuf Process(IWriter writer, IReader reader, IContext context);
+    Task<IReadableByteBuf> Process(CancellationToken token, IWriter writer, IReader reader, IContext context);
 }

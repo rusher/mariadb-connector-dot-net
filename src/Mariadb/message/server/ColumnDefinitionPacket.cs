@@ -142,6 +142,31 @@ public class ColumnDefinitionPacket : IColumn, IServerMessage
         return _extTypeName;
     }
 
+    public string GetDataTypeName()
+    {
+        if (_dataType == DataType.VARCHAR
+            || _dataType == DataType.JSON
+            || _dataType == DataType.ENUM
+            || _dataType == DataType.SET
+            || _dataType == DataType.VARSTRING
+            || _dataType == DataType.STRING
+            || _dataType == DataType.BLOB
+            || _dataType == DataType.TINYBLOB
+            || _dataType == DataType.MEDIUMBLOB
+            || _dataType == DataType.LONGBLOB)
+        {
+            if (!IsBinary())
+            {
+                int? maxWidth = CharsetEncodingLength.MaxCharlen[_charset];
+                if (maxWidth != null) return _dataType + "(" + (int)(_columnLength / maxWidth.Value) + ")";
+            }
+
+            return _dataType + "(" + _columnLength + ")";
+        }
+
+        return _dataType.ToString();
+    }
+
     public virtual int GetPrecision()
     {
         return (int)GetColumnLength();

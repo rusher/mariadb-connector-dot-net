@@ -1,4 +1,5 @@
 using System.Data;
+using System.IO.Pipes;
 using System.Net.Sockets;
 using Mariadb.client.context;
 using Mariadb.client.result;
@@ -18,24 +19,25 @@ namespace Mariadb.client.impl;
 public class StandardClient : IClient
 {
     private static readonly Ilogger _logger = Loggers.getLogger("StandardClient");
-    private readonly object _lock;
-    private bool _closed;
     private readonly MutableByte _compressionSequence = new();
     private readonly Configuration _conf;
     private readonly bool _disablePipeline;
+    private readonly SemaphoreSlim _lock;
+    private readonly MutableByte _sequence = new();
+    private bool _closed;
     private Stream _in;
     private Stream _out;
     private IReader _reader;
-    private readonly MutableByte _sequence = new();
     private Socket _socket;
     private int _socketTimeout;
+    private Stream _stream;
     private IClientMessage _streamMsg;
     private MariaDbCommand _streamStmt;
     private IWriter _writer;
 
 
     private StandardClient(
-        Configuration conf, object lockObj, HostAddress hostAddress)
+        Configuration conf, SemaphoreSlim lockObj, HostAddress hostAddress)
     {
         _conf = conf;
         _lock = lockObj;
@@ -54,26 +56,27 @@ public class StandardClient : IClient
         if (_closed) throw new DbNonTransientConnectionException("Connection is closed", 1220, "08000");
     }
 
-    public List<ICompletion> Execute(IClientMessage message, bool canRedo)
+    public async Task<List<ICompletion>> Execute(CancellationToken cancellationToken, IClientMessage message,
+        bool canRedo)
     {
-        return Execute(
+        return await Execute(cancellationToken,
             message,
             null,
             0,
             canRedo);
     }
 
-    public List<ICompletion> Execute(
+    public async Task<List<ICompletion>> Execute(CancellationToken cancellationToken,
         IClientMessage message, MariaDbCommand stmt, bool canRedo)
     {
-        return Execute(
+        return await Execute(cancellationToken,
             message,
             stmt,
             0,
             canRedo);
     }
 
-    public List<ICompletion> ExecutePipeline(
+    public async Task<List<ICompletion>> ExecutePipeline(CancellationToken cancellationToken,
         IClientMessage[] messages,
         MariaDbCommand stmt,
         CommandBehavior behavior,
@@ -89,7 +92,7 @@ public class StandardClient : IClient
             {
                 for (readCounter = 0; readCounter < messages.Length; readCounter++)
                     results.AddRange(
-                        Execute(
+                        await Execute(cancellationToken,
                             messages[readCounter],
                             stmt,
                             behavior,
@@ -97,13 +100,15 @@ public class StandardClient : IClient
             }
             else
             {
-                for (var i = 0; i < messages.Length; i++) responseMsg[i] = SendQuery(messages[i]);
+                for (var i = 0; i < messages.Length; i++)
+                    responseMsg[i] = await SendQuery(cancellationToken, messages[i]);
                 while (readCounter < messages.Length)
                 {
                     readCounter++;
                     for (var j = 0; j < responseMsg[readCounter - 1]; j++)
                         results.AddRange(
-                            ReadResponse(
+                            await ReadResponse(
+                                cancellationToken,
                                 stmt,
                                 messages[readCounter - 1],
                                 behavior));
@@ -122,7 +127,7 @@ public class StandardClient : IClient
                     try
                     {
                         results.AddRange(
-                            ReadResponse(
+                            await ReadResponse(cancellationToken,
                                 stmt,
                                 messages[i],
                                 behavior));
@@ -149,15 +154,16 @@ public class StandardClient : IClient
         }
     }
 
-    public List<ICompletion> Execute(
+    public async Task<List<ICompletion>> Execute(CancellationToken cancellationToken,
         IClientMessage message,
         MariaDbCommand stmt,
         CommandBehavior behavior,
         bool canRedo)
     {
-        var nbResp = SendQuery(message);
+        var nbResp = await SendQuery(cancellationToken, message);
         if (nbResp == 1)
-            return ReadResponse(
+            return await ReadResponse(
+                cancellationToken,
                 stmt,
                 message,
                 behavior);
@@ -172,7 +178,8 @@ public class StandardClient : IClient
         try
         {
             while (nbResp-- > 0)
-                ReadResults(
+                await ReadResults(
+                    cancellationToken,
                     stmt,
                     message,
                     completions,
@@ -184,7 +191,8 @@ public class StandardClient : IClient
             while (nbResp-- > 0)
                 try
                 {
-                    ReadResults(
+                    await ReadResults(
+                        cancellationToken,
                         stmt,
                         message,
                         completions,
@@ -199,12 +207,12 @@ public class StandardClient : IClient
         }
     }
 
-    public void ClosePrepare(IPrepare prepare)
+    public async Task ClosePrepare(IPrepare prepare)
     {
         CheckNotClosed();
         try
         {
-            new ClosePreparePacket(prepare.StatementId).Encode(_writer, Context);
+            await new ClosePreparePacket(prepare.StatementId).Encode(CancellationToken.None, _writer, Context);
         }
         catch (Exception ioException)
         {
@@ -216,12 +224,14 @@ public class StandardClient : IClient
         }
     }
 
-    public void ReadStreamingResults(
+    public async Task ReadStreamingResults(
+        CancellationToken cancellationToken,
         List<ICompletion> completions,
         CommandBehavior behavior)
     {
         if (_streamStmt != null)
-            ReadResults(
+            await ReadResults(
+                cancellationToken,
                 _streamStmt,
                 _streamMsg,
                 completions,
@@ -233,15 +243,14 @@ public class StandardClient : IClient
         return _closed;
     }
 
-    public void Close()
+    public async Task CloseAsync()
     {
-        var locked = Monitor.TryEnter(_lock);
         if (!_closed)
         {
             _closed = true;
             try
             {
-                QuitPacket.INSTANCE.Encode(_writer, Context);
+                await QuitPacket.INSTANCE.Encode(CancellationToken.None, _writer, Context);
             }
             catch (IOException e)
             {
@@ -250,8 +259,6 @@ public class StandardClient : IClient
 
             CloseSocket();
         }
-
-        if (locked) Monitor.Exit(_lock);
     }
 
     public bool IsPrimary()
@@ -265,18 +272,19 @@ public class StandardClient : IClient
         Context.ResetPrepareCache();
     }
 
-    public static StandardClient BuildClient(Configuration conf, object lockObj, HostAddress hostAddress,
+    public static async Task<StandardClient> BuildClient(CancellationToken cancellationToken, Configuration conf,
+        SemaphoreSlim lockObj, HostAddress hostAddress,
         bool skipPostCommands)
     {
         var client = new StandardClient(conf, lockObj, hostAddress);
-        client.Initialize(skipPostCommands);
+        await client.Initialize(cancellationToken, skipPostCommands);
         return client;
     }
 
-    private void Initialize(bool skipPostCommands)
+    private async Task Initialize(CancellationToken cancellationToken, bool skipPostCommands)
     {
         var host = HostAddress?.Host;
-        ConnectSocket(_conf, HostAddress);
+        await ConnectSocket(_conf, HostAddress);
 
         try
         {
@@ -286,7 +294,7 @@ public class StandardClient : IClient
             AssignStream(_conf, null);
 
             // read server handshake
-            var buf = _reader.ReadReusablePacket(_logger.isTraceEnabled());
+            var buf = await _reader.ReadReusablePacket(cancellationToken, _logger.isTraceEnabled());
             if (buf.GetByte() == -1)
             {
                 var errorPacket = new ErrorPacket(buf, null);
@@ -332,7 +340,7 @@ public class StandardClient : IClient
             // handling authentication
             // **********************************************************************
             var authenticationPluginType = handshake.AuthenticationPluginType;
-            new HandshakeResponse(
+            await new HandshakeResponse(
                     _conf.User,
                     _conf.Password,
                     authenticationPluginType,
@@ -341,10 +349,10 @@ public class StandardClient : IClient
                     host,
                     clientCapabilities,
                     exchangeCharset)
-                .Encode(_writer, Context);
+                .Encode(cancellationToken, _writer, Context);
             _writer.Flush();
 
-            AuthenticationHandler(_conf.Password, _writer, _reader, Context);
+            await AuthenticationHandler(_conf.Password, _writer, _reader, Context);
 
             // **********************************************************************
             // activate compression if required
@@ -360,7 +368,7 @@ public class StandardClient : IClient
             // **********************************************************************
             // post queries
             // **********************************************************************
-            if (!skipPostCommands) PostConnectionQueries();
+            if (!skipPostCommands) await PostConnectionQueries(cancellationToken);
         }
         catch (IOException ioException)
         {
@@ -429,7 +437,7 @@ public class StandardClient : IClient
     }
 
 
-    public void ConnectSocket(Configuration conf, HostAddress hostAddress)
+    public async Task ConnectSocket(Configuration conf, HostAddress hostAddress)
     {
         try
         {
@@ -437,20 +445,27 @@ public class StandardClient : IClient
                 throw new ArgumentException("hostname must be set to connect socket if not using local socket or pipe");
             if (conf.Protocol == Protocol.Pipe)
             {
-                // var pipeName = $@"\\{hostAddress.Host}\pipe\{conf.Pipe}";
-                // var namedPipeStream = new NamedPipeClientStream(hostAddress!.Host, pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-                // namedPipeStream.Connect((int)conf.ConnectionTimeout);
+                var pipeName = $@"\\{hostAddress.Host}\pipe\{conf.Pipe}";
+                var namedPipeStream = new NamedPipeClientStream(hostAddress!.Host, pipeName, PipeDirection.InOut,
+                    PipeOptions.Asynchronous);
+                await namedPipeStream.ConnectAsync((int)conf.ConnectionTimeout);
+                _stream = namedPipeStream;
             }
             else if (conf.Protocol == Protocol.Unix)
             {
                 _socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.IP);
                 var unixEp = new UnixDomainSocketEndPoint(hostAddress.Host);
-                _socket.Connect(unixEp);
+                await _socket.ConnectAsync(unixEp);
+                _stream = new NetworkStream(_socket, true);
+                _socket.NoDelay = true;
             }
             else
             {
                 var tcpClient = new TcpClient();
-                tcpClient.Connect(hostAddress.Host, (int)hostAddress.Port);
+                await tcpClient.ConnectAsync(hostAddress.Host, (int)hostAddress.Port);
+                _socket = tcpClient.Client;
+                _stream = tcpClient.GetStream();
+                _socket.NoDelay = true;
             }
         }
         catch (Exception ioe)
@@ -465,18 +480,18 @@ public class StandardClient : IClient
     {
         _writer =
             new PacketWriter(
-                _socket, conf.MaxQuerySizeToLog, conf.MaxAllowedPacket, _sequence, _compressionSequence);
+                _stream, conf.MaxQuerySizeToLog, conf.MaxAllowedPacket, _sequence, _compressionSequence);
         _writer.SetServerThreadId(threadId, HostAddress);
 
-        _reader = new PacketReader(_socket, conf, _sequence);
+        _reader = new PacketReader(_stream, conf, _sequence);
         _reader.SetServerThreadId(threadId, HostAddress);
     }
 
-    public static void AuthenticationHandler(string password, IWriter writer, IReader reader, IContext context)
+    public static async Task AuthenticationHandler(string password, IWriter writer, IReader reader, IContext context)
     {
         writer.PermitTrace(true);
         var conf = context.Conf;
-        var buf = reader.ReadReusablePacket();
+        var buf = await reader.ReadReusablePacket(CancellationToken.None);
 
         while (true)
             switch (buf.GetByte() & 0xFF)
@@ -492,7 +507,7 @@ public class StandardClient : IClient
 
                     authenticationPlugin.Initialize(
                         password, authSwitchPacket.Seed, conf);
-                    buf = authenticationPlugin.Process(writer, reader, context);
+                    buf = await authenticationPlugin.Process(CancellationToken.None, writer, reader, context);
                     break;
 
                 case 0xFF:
@@ -516,7 +531,7 @@ public class StandardClient : IClient
                     buf.ReadLongLengthEncodedNotNull(); // skip insert id
                     // insertId
                     context.ServerStatus = buf.ReadShort();
-                    break;
+                    goto authentication_end;
 
                 default:
                     throw context
@@ -526,14 +541,15 @@ public class StandardClient : IClient
                             "08000");
             }
 
+        authentication_end:
         writer.PermitTrace(true);
     }
 
-    private void PostConnectionQueries()
+    private async Task PostConnectionQueries(CancellationToken cancellationToken)
     {
         var commands = new List<string>();
 
-        var serverTz = _conf.Timezone != null ? HandleTimezone() : null;
+        var serverTz = _conf.Timezone != null ? await HandleTimezone(cancellationToken) : null;
         var sessionVariableQuery = CreateSessionVariableQuery(serverTz);
         if (sessionVariableQuery != null) commands.Add(sessionVariableQuery);
 
@@ -556,7 +572,7 @@ public class StandardClient : IClient
                 var msgs = new IClientMessage[commands.Count];
                 for (var i = 0; i < commands.Count; i++) msgs[i] = new QueryPacket(commands[i]);
                 res =
-                    ExecutePipeline(
+                    await ExecutePipeline(cancellationToken,
                         msgs,
                         null,
                         0,
@@ -576,7 +592,7 @@ public class StandardClient : IClient
     }
 
 
-    private string HandleTimezone()
+    private async Task<string> HandleTimezone(CancellationToken cancellationToken)
     {
         if (!string.Equals("disable", _conf.Timezone))
         {
@@ -585,7 +601,8 @@ public class StandardClient : IClient
             {
                 var res =
                     (AbstractDataReader)
-                    Execute(new QueryPacket("SELECT @@time_zone, @@system_time_zone"), true)[0];
+                    (await Execute(cancellationToken, new QueryPacket("SELECT @@time_zone, @@system_time_zone"),
+                        true))[0];
                 res.Read();
                 timeZone = res.GetString(1);
                 if (string.Equals("SYSTEM", timeZone)) timeZone = res.GetString(2);
@@ -594,12 +611,12 @@ public class StandardClient : IClient
             {
                 var res =
                     (AbstractDataReader)
-                    Execute(
+                    (await Execute(cancellationToken,
                         new QueryPacket(
                             "SHOW VARIABLES WHERE Variable_name in ("
                             + "'system_time_zone',"
                             + "'time_zone')"),
-                        true)[0];
+                        true))[0];
                 string systemTimeZone = null;
                 while (res.Read())
                     if (string.Equals("system_time_zone", res.GetString(1)))
@@ -744,14 +761,14 @@ public class StandardClient : IClient
         }
     }
 
-    public int SendQuery(IClientMessage message)
+    public async Task<int> SendQuery(CancellationToken cancellationToken, IClientMessage message)
     {
         CheckNotClosed();
         try
         {
             if (_logger.isDebugEnabled() && message.Description != null)
                 _logger.debug($"execute query: {message.Description}");
-            return message.Encode(_writer, Context);
+            return await message.Encode(cancellationToken, _writer, Context);
         }
         catch (Exception e)
         {
@@ -781,7 +798,8 @@ public class StandardClient : IClient
         }
     }
 
-    public List<ICompletion> ReadResponse(
+    public async Task<List<ICompletion>> ReadResponse(
+        CancellationToken cancellationToken,
         MariaDbCommand stmt,
         IClientMessage message,
         CommandBehavior behavior)
@@ -794,7 +812,8 @@ public class StandardClient : IClient
         }
 
         var completions = new List<ICompletion>();
-        ReadResults(
+        await ReadResults(
+            cancellationToken,
             stmt,
             message,
             completions,
@@ -802,7 +821,7 @@ public class StandardClient : IClient
         return completions;
     }
 
-    public void readResponse(IClientMessage message)
+    public async Task ReadResponse(CancellationToken cancellationToken, IClientMessage message)
     {
         CheckNotClosed();
         if (_streamStmt != null)
@@ -812,39 +831,42 @@ public class StandardClient : IClient
         }
 
         var completions = new List<ICompletion>();
-        ReadResults(
+        await ReadResults(cancellationToken,
             null,
             message,
             completions,
             CommandBehavior.Default);
     }
 
-    private void ReadResults(
+    private async Task ReadResults(
+        CancellationToken cancellationToken,
         MariaDbCommand stmt,
         IClientMessage message,
         List<ICompletion> completions,
         CommandBehavior behavior)
     {
         completions.Add(
-            ReadPacket(
+            await ReadPacket(
+                cancellationToken,
                 stmt,
                 message,
                 behavior));
 
         while ((Context.ServerStatus & ServerStatus.MORE_RESULTS_EXISTS) > 0)
             completions.Add(
-                ReadPacket(
+                await ReadPacket(cancellationToken,
                     stmt,
                     message,
                     behavior));
     }
 
-    public ICompletion ReadPacket(IClientMessage message)
+    public async Task<ICompletion> ReadPacket(CancellationToken cancellationToken, IClientMessage message)
     {
-        return ReadPacket(null, message, 0);
+        return await ReadPacket(cancellationToken, null, message, 0);
     }
 
-    public ICompletion ReadPacket(
+    public async Task<ICompletion> ReadPacket(
+        CancellationToken cancellationToken,
         MariaDbCommand stmt,
         IClientMessage message,
         CommandBehavior behavior)
@@ -853,7 +875,8 @@ public class StandardClient : IClient
         {
             var traceEnable = _logger.isTraceEnabled();
             var completion =
-                message.ReadPacket(
+                await message.ReadPacket(
+                    cancellationToken,
                     stmt,
                     behavior,
                     _reader,

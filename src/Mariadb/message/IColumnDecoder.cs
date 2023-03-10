@@ -9,6 +9,7 @@ namespace Mariadb.message.server;
 public interface IColumnDecoder : IColumn
 {
     int GetPrecision();
+
     object GetDefaultText(Configuration conf, IReadableByteBuf buf, int length);
     object GetDefaultBinary(Configuration conf, IReadableByteBuf buf, int length);
     string DecodeStringText(IReadableByteBuf buf, int length);
@@ -29,6 +30,10 @@ public interface IColumnDecoder : IColumn
     float DecodeFloatBinary(IReadableByteBuf buf, int length);
     double DecodeDoubleText(IReadableByteBuf buf, int length);
     double DecodeDoubleBinary(IReadableByteBuf buf, int length);
+    decimal DecodeDecimalText(IReadableByteBuf buf, int length);
+    decimal DecodeDecimalBinary(IReadableByteBuf buf, int length);
+    Guid DecodeGuidText(IReadableByteBuf buf, int length);
+    Guid DecodeGuidBinary(IReadableByteBuf buf, int length);
 
     static IColumnDecoder Decode(IReadableByteBuf buf, bool extendedInfo)
     {

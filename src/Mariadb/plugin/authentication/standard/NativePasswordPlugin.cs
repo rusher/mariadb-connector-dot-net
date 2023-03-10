@@ -19,7 +19,8 @@ public class NativePasswordPlugin : IAuthenticationPlugin
         _authenticationData = authenticationData;
     }
 
-    public IReadableByteBuf Process(IWriter writer, IReader reader, IContext context)
+    public async Task<IReadableByteBuf> Process(CancellationToken cancellationToken, IWriter writer, IReader reader,
+        IContext context)
     {
         if (_authenticationData == null)
         {
@@ -33,7 +34,7 @@ public class NativePasswordPlugin : IAuthenticationPlugin
             writer.Flush();
         }
 
-        return reader.ReadReusablePacket();
+        return await reader.ReadReusablePacket(cancellationToken);
     }
 
     public static byte[] encryptPassword(string password, byte[] seed)

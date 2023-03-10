@@ -4,9 +4,9 @@ using Mariadb.utils.exception;
 
 namespace Mariadb.client.decoder;
 
-public class SignedTinyIntColumn : ColumnDefinitionPacket, IColumnDecoder
+public class UnsignedInt8Column : ColumnDefinitionPacket, IColumnDecoder
 {
-    public SignedTinyIntColumn(
+    public UnsignedInt8Column(
         IReadableByteBuf buf,
         int charset,
         long length,
@@ -29,13 +29,12 @@ public class SignedTinyIntColumn : ColumnDefinitionPacket, IColumnDecoder
     public object GetDefaultBinary(Configuration conf, IReadableByteBuf buf, int length)
     {
         if (_columnLength == 1) return DecodeBooleanBinary(buf, length);
-        if (IsSigned()) return (int)buf.ReadByte();
         return (int)buf.ReadUnsignedByte();
     }
 
     public bool DecodeBooleanText(IReadableByteBuf buf, int length)
     {
-        return buf.ReadAscii(length) != "0";
+        return !string.Equals("0", buf.ReadAscii(length));
     }
 
     public bool DecodeBooleanBinary(IReadableByteBuf buf, int length)
@@ -52,7 +51,6 @@ public class SignedTinyIntColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public byte DecodeByteBinary(IReadableByteBuf buf, int length)
     {
-        if (IsSigned()) return buf.ReadByte();
         long result = buf.ReadUnsignedByte();
 
         if ((byte)result != result) throw new ArgumentException("byte overflow");
@@ -66,8 +64,7 @@ public class SignedTinyIntColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public string? DecodeStringBinary(IReadableByteBuf buf, int length)
     {
-        if (!IsSigned()) return buf.ReadUnsignedByte().ToString();
-        return buf.ReadByte().ToString();
+        return buf.ReadUnsignedByte().ToString();
     }
 
     public short DecodeShortText(IReadableByteBuf buf, int length)
@@ -77,7 +74,7 @@ public class SignedTinyIntColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public short DecodeShortBinary(IReadableByteBuf buf, int length)
     {
-        return IsSigned() ? buf.ReadByte() : buf.ReadUnsignedByte();
+        return buf.ReadUnsignedByte();
     }
 
     public int DecodeIntText(IReadableByteBuf buf, int length)
@@ -87,7 +84,7 @@ public class SignedTinyIntColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public int DecodeIntBinary(IReadableByteBuf buf, int length)
     {
-        return IsSigned() ? buf.ReadByte() : buf.ReadUnsignedByte();
+        return buf.ReadUnsignedByte();
     }
 
     public long DecodeLongText(IReadableByteBuf buf, int length)
@@ -97,8 +94,7 @@ public class SignedTinyIntColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public long DecodeLongBinary(IReadableByteBuf buf, int length)
     {
-        if (!IsSigned()) return buf.ReadUnsignedByte();
-        return buf.ReadByte();
+        return buf.ReadUnsignedByte();
     }
 
     public float DecodeFloatText(IReadableByteBuf buf, int length)
@@ -108,8 +104,7 @@ public class SignedTinyIntColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public float DecodeFloatBinary(IReadableByteBuf buf, int length)
     {
-        if (!IsSigned()) return buf.ReadUnsignedByte();
-        return buf.ReadByte();
+        return buf.ReadUnsignedByte();
     }
 
     public double DecodeDoubleText(IReadableByteBuf buf, int length)
@@ -119,8 +114,7 @@ public class SignedTinyIntColumn : ColumnDefinitionPacket, IColumnDecoder
 
     public double DecodeDoubleBinary(IReadableByteBuf buf, int length)
     {
-        if (!IsSigned()) return buf.ReadUnsignedByte();
-        return buf.ReadByte();
+        return buf.ReadUnsignedByte();
     }
 
     public DateTime DecodeDateTimeText(IReadableByteBuf buf, int length)
@@ -133,5 +127,27 @@ public class SignedTinyIntColumn : ColumnDefinitionPacket, IColumnDecoder
     {
         buf.Skip(length);
         throw new DbDataException($"Data type {_dataType} cannot be decoded as Date");
+    }
+
+    public decimal DecodeDecimalText(IReadableByteBuf buf, int length)
+    {
+        return buf.Atoll(length);
+    }
+
+    public decimal DecodeDecimalBinary(IReadableByteBuf buf, int length)
+    {
+        return buf.ReadUnsignedByte();
+    }
+
+    public Guid DecodeGuidText(IReadableByteBuf buf, int length)
+    {
+        buf.Skip(length);
+        throw new DbDataException($"Data type {_dataType} cannot be decoded as Guid");
+    }
+
+    public Guid DecodeGuidBinary(IReadableByteBuf buf, int length)
+    {
+        buf.Skip(length);
+        throw new DbDataException($"Data type {_dataType} cannot be decoded as Guid");
     }
 }

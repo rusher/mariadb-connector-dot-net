@@ -1,4 +1,3 @@
-using System.Net.Sockets;
 using System.Text;
 using Mariadb.client.util;
 using Mariadb.utils.exception;
@@ -24,10 +23,11 @@ public class PacketWriter : IWriter
     private readonly uint? _maxAllowedPacket;
     private readonly int _maxPacketLength = MAX_PACKET_LENGTH;
     private readonly uint _maxQuerySizeToLog;
-    private readonly Socket _out;
+    private readonly Stream _out;
     private readonly MutableByte _sequence;
 
     private bool _bufContainDataAfterMark;
+    private CancellationToken _cancellationToken = CancellationToken.None;
     private long _cmdLength;
     protected MutableByte _compressSequence;
     private int _mark = -1;
@@ -36,13 +36,13 @@ public class PacketWriter : IWriter
     private string _serverThreadLog = "";
 
     public PacketWriter(
-        Socket socket,
+        Stream stream,
         uint maxQuerySizeToLog,
         uint? maxAllowedPacket,
         MutableByte sequence,
         MutableByte compressSequence)
     {
-        _out = socket;
+        _out = stream;
         Buf = new byte[SMALL_BUFFER_SIZE];
         _maxQuerySizeToLog = maxQuerySizeToLog;
         _cmdLength = 0;
@@ -68,26 +68,26 @@ public class PacketWriter : IWriter
         return _cmdLength;
     }
 
-    public void WriteByte(int value)
+    public async Task WriteByte(int value)
     {
         if (_pos >= Buf.Length)
         {
             if (_pos >= _maxPacketLength && !_bufContainDataAfterMark)
                 // buf is more than a Packet, must flushbuf()
-                WriteSocket(false);
+                await WriteSocket(false);
             else
-                GrowBuffer(1);
+                await GrowBuffer(1);
         }
 
         Buf[_pos++] = (byte)value;
     }
 
-    public void WriteShort(short value)
+    public async Task WriteShort(short value)
     {
         if (2 > Buf.Length - _pos)
         {
             // not enough space remaining
-            WriteBytes(new[] { (byte)value, (byte)(value >> 8) }, 0, 2);
+            await WriteBytes(new[] { (byte)value, (byte)(value >> 8) }, 0, 2);
             return;
         }
 
@@ -96,7 +96,7 @@ public class PacketWriter : IWriter
         _pos += 2;
     }
 
-    public void WriteInt(int value)
+    public async Task WriteInt(int value)
     {
         if (4 > Buf.Length - Pos)
         {
@@ -106,7 +106,7 @@ public class PacketWriter : IWriter
             arr[1] = (byte)(value >> 8);
             arr[2] = (byte)(value >> 16);
             arr[3] = (byte)(value >> 24);
-            WriteBytes(arr, 0, 4);
+            await WriteBytes(arr, 0, 4);
             return;
         }
 
@@ -117,7 +117,7 @@ public class PacketWriter : IWriter
         _pos += 4;
     }
 
-    public void WriteUInt(uint value)
+    public async Task WriteUInt(uint value)
     {
         if (4 > Buf.Length - Pos)
         {
@@ -127,7 +127,7 @@ public class PacketWriter : IWriter
             arr[1] = (byte)(value >> 8);
             arr[2] = (byte)(value >> 16);
             arr[3] = (byte)(value >> 24);
-            WriteBytes(arr, 0, 4);
+            await WriteBytes(arr, 0, 4);
             return;
         }
 
@@ -138,7 +138,7 @@ public class PacketWriter : IWriter
         _pos += 4;
     }
 
-    public void WriteLong(long value)
+    public async Task WriteLong(long value)
     {
         if (8 > Buf.Length - _pos)
         {
@@ -152,7 +152,7 @@ public class PacketWriter : IWriter
             arr[5] = (byte)(value >> 40);
             arr[6] = (byte)(value >> 48);
             arr[7] = (byte)(value >> 56);
-            WriteBytes(arr, 0, 8);
+            await WriteBytes(arr, 0, 8);
             return;
         }
 
@@ -167,19 +167,19 @@ public class PacketWriter : IWriter
         _pos += 8;
     }
 
-    public void WriteDouble(double value)
+    public async Task WriteDouble(double value)
     {
-        WriteBytes(BitConverter.GetBytes(value), 0, 8);
+        await WriteBytes(BitConverter.GetBytes(value), 0, 8);
     }
 
-    public void WriteFloat(float value)
+    public async Task WriteFloat(float value)
     {
-        WriteBytes(BitConverter.GetBytes(value), 0, 4);
+        await WriteBytes(BitConverter.GetBytes(value), 0, 4);
     }
 
-    public void WriteBytes(byte[] arr)
+    public async Task WriteBytes(byte[] arr)
     {
-        WriteBytes(arr, 0, arr.Length);
+        await WriteBytes(arr, 0, arr.Length);
     }
 
     public void WriteBytesAtPos(byte[] arr, int pos)
@@ -187,19 +187,19 @@ public class PacketWriter : IWriter
         Array.Copy(arr, 0, Buf, pos, arr.Length);
     }
 
-    public void WriteBytes(byte[] arr, int off, int len)
+    public async Task WriteBytes(byte[] arr, int off, int len)
     {
         if (len > Buf.Length - _pos)
         {
-            if (Buf.Length != _maxPacketLength) GrowBuffer(len);
+            if (Buf.Length != _maxPacketLength) await GrowBuffer(len);
 
             // max buf size
             if (len > Buf.Length - _pos)
             {
                 if (_mark != -1)
                 {
-                    GrowBuffer(len);
-                    if (_mark != -1) FlushBufferStopAtMark();
+                    await GrowBuffer(len);
+                    if (_mark != -1) await FlushBufferStopAtMark();
                 }
 
                 if (len > Buf.Length - _pos)
@@ -215,7 +215,7 @@ public class PacketWriter : IWriter
                         off += lenToFillbuf;
                         _pos += lenToFillbuf;
                         if (remainingLen > 0)
-                            WriteSocket(false);
+                            await WriteSocket(false);
                         else
                             break;
                     } while (true);
@@ -229,11 +229,11 @@ public class PacketWriter : IWriter
         _pos += len;
     }
 
-    public void WriteLength(long length)
+    public async Task WriteLength(long length)
     {
         if (length < 251)
         {
-            WriteByte((byte)length);
+            await WriteByte((byte)length);
             return;
         }
 
@@ -246,7 +246,7 @@ public class PacketWriter : IWriter
                 arr[0] = 0xfc;
                 arr[1] = (byte)length;
                 arr[2] = (byte)(length >>> 8);
-                WriteBytes(arr, 0, 3);
+                await WriteBytes(arr, 0, 3);
                 return;
             }
 
@@ -267,7 +267,7 @@ public class PacketWriter : IWriter
                 arr[1] = (byte)length;
                 arr[2] = (byte)(length >>> 8);
                 arr[3] = (byte)(length >>> 16);
-                WriteBytes(arr, 0, 4);
+                await WriteBytes(arr, 0, 4);
                 return;
             }
 
@@ -292,7 +292,7 @@ public class PacketWriter : IWriter
             arr[6] = (byte)(length >>> 40);
             arr[7] = (byte)(length >>> 48);
             arr[8] = (byte)(length >>> 56);
-            WriteBytes(arr, 0, 9);
+            await WriteBytes(arr, 0, 9);
             return;
         }
 
@@ -308,20 +308,20 @@ public class PacketWriter : IWriter
         _pos += 9;
     }
 
-    public void WriteAscii(string str)
+    public async Task WriteAscii(string str)
     {
         var len = str.Length;
         if (len > Buf.Length - _pos)
         {
             var arr = Encoding.ASCII.GetBytes(str);
-            WriteBytes(arr, 0, arr.Length);
+            await WriteBytes(arr, 0, arr.Length);
             return;
         }
 
         for (var off = 0; off < len;) Buf[_pos++] = (byte)str[off++];
     }
 
-    public void WriteString(string str)
+    public async Task WriteString(string str)
     {
         var charsLength = str.Length;
 
@@ -329,7 +329,7 @@ public class PacketWriter : IWriter
         if (charsLength * 3 >= Buf.Length - _pos)
         {
             var arr = Encoding.UTF8.GetBytes(str);
-            WriteBytes(arr, 0, arr.Length);
+            await WriteBytes(arr, 0, arr.Length);
             return;
         }
 
@@ -408,7 +408,7 @@ public class PacketWriter : IWriter
         }
     }
 
-    public void WriteStringEscaped(string str, bool noBackslashEscapes)
+    public async Task WriteStringEscaped(string str, bool noBackslashEscapes)
     {
         var charsLength = str.Length;
 
@@ -416,7 +416,7 @@ public class PacketWriter : IWriter
         if (charsLength * 3 >= Buf.Length - _pos)
         {
             var arr = Encoding.UTF8.GetBytes(str);
-            WriteBytesEscaped(arr, arr.Length, noBackslashEscapes);
+            await WriteBytesEscaped(arr, arr.Length, noBackslashEscapes);
             return;
         }
 
@@ -520,12 +520,12 @@ public class PacketWriter : IWriter
         }
     }
 
-    public void WriteBytesEscaped(byte[] bytes, int len, bool noBackslashEscapes)
+    public async Task WriteBytesEscaped(byte[] bytes, int len, bool noBackslashEscapes)
     {
         if (len * 2 > Buf.Length - _pos)
         {
             // makes buf bigger (up to 16M)
-            if (Buf.Length != _maxPacketLength) GrowBuffer(len * 2);
+            if (Buf.Length != _maxPacketLength) await GrowBuffer(len * 2);
 
             // data may be bigger than buf.
             // must flush buf when full (and reset position to 0)
@@ -533,24 +533,24 @@ public class PacketWriter : IWriter
             {
                 if (_mark != -1)
                 {
-                    GrowBuffer(len * 2);
-                    if (_mark != -1) FlushBufferStopAtMark();
+                    await GrowBuffer(len * 2);
+                    if (_mark != -1) await FlushBufferStopAtMark();
                 }
                 else
                 {
                     // not enough space in buf, will fill buf
-                    if (Buf.Length <= _pos) WriteSocket(false);
+                    if (Buf.Length <= _pos) await WriteSocket(false);
                     if (noBackslashEscapes)
                         for (var i = 0; i < len; i++)
                         {
                             if (QUOTE == bytes[i])
                             {
                                 Buf[_pos++] = QUOTE;
-                                if (Buf.Length <= _pos) WriteSocket(false);
+                                if (Buf.Length <= _pos) await WriteSocket(false);
                             }
 
                             Buf[_pos++] = bytes[i];
-                            if (Buf.Length <= _pos) WriteSocket(false);
+                            if (Buf.Length <= _pos) await WriteSocket(false);
                         }
                     else
                         for (var i = 0; i < len; i++)
@@ -561,11 +561,11 @@ public class PacketWriter : IWriter
                                 || bytes[i] == ZERO_BYTE)
                             {
                                 Buf[_pos++] = Convert.ToByte('\\');
-                                if (Buf.Length <= _pos) WriteSocket(false);
+                                if (Buf.Length <= _pos) await WriteSocket(false);
                             }
 
                             Buf[_pos++] = bytes[i];
-                            if (Buf.Length <= _pos) WriteSocket(false);
+                            if (Buf.Length <= _pos) await WriteSocket(false);
                         }
 
                     return;
@@ -592,13 +592,13 @@ public class PacketWriter : IWriter
             }
     }
 
-    public void WriteEmptyPacket()
+    public async Task WriteEmptyPacket()
     {
         Buf[0] = 0x00;
         Buf[1] = 0x00;
         Buf[2] = 0x00;
         Buf[3] = _sequence.incrementAndGet();
-        _out.Send(Buf, 0, 4, 0);
+        await _out.WriteAsync(Buf, 0, 4, _cancellationToken);
 
         if (logger.isTraceEnabled())
             logger.trace(
@@ -607,9 +607,9 @@ public class PacketWriter : IWriter
         _cmdLength = 0;
     }
 
-    public void Flush()
+    public async Task Flush()
     {
-        WriteSocket(true);
+        await WriteSocket(true);
 
         // if buf is big, and last query doesn't use at least half of it, resize buf to default
         // value
@@ -620,9 +620,9 @@ public class PacketWriter : IWriter
         _mark = -1;
     }
 
-    public void FlushPipeline()
+    public async Task FlushPipeline()
     {
-        WriteSocket(false);
+        await WriteSocket(false);
 
         // if buf is big, and last query doesn't use at least half of it, resize buf to default
         // value
@@ -668,13 +668,13 @@ public class PacketWriter : IWriter
         return _sequence.Value != -1;
     }
 
-    public void FlushBufferStopAtMark()
+    public async Task FlushBufferStopAtMark()
     {
         var end = _pos;
         _pos = _mark;
-        WriteSocket(true);
+        await WriteSocket(true);
         //_out.Flush();
-        InitPacket();
+        InitPacket(_cancellationToken);
 
         Array.Copy(Buf, _mark, Buf, _pos, end - _mark);
         _pos += end - _mark;
@@ -696,7 +696,7 @@ public class PacketWriter : IWriter
         {
             var data = new byte[_pos - 4];
             Array.Copy(Buf, _pos, data, 0, _pos - 4);
-            InitPacket();
+            InitPacket(_cancellationToken);
             _bufContainDataAfterMark = false;
             return data;
         }
@@ -704,8 +704,9 @@ public class PacketWriter : IWriter
         return null;
     }
 
-    public void InitPacket()
+    public void InitPacket(CancellationToken cancellationToken)
     {
+        _cancellationToken = cancellationToken;
         _sequence.Value = 0xff;
         _compressSequence.Value = 0xff;
         _pos = 4;
@@ -717,7 +718,7 @@ public class PacketWriter : IWriter
         _out.Close();
     }
 
-    private void GrowBuffer(int len)
+    private async Task GrowBuffer(int len)
     {
         var bufLength = Buf.Length;
         int newCapacity;
@@ -753,7 +754,7 @@ public class PacketWriter : IWriter
             {
                 // buf is > 16M with mark.
                 // flush until mark, reset pos at beginning
-                FlushBufferStopAtMark();
+                await FlushBufferStopAtMark();
 
                 if (len + _pos <= bufLength) return;
 
@@ -782,7 +783,7 @@ public class PacketWriter : IWriter
                     _cmdLength != 0);
     }
 
-    private void WriteSocket(bool commandEnd)
+    private async Task WriteSocket(bool commandEnd)
     {
         if (_pos > 4)
         {
@@ -791,7 +792,7 @@ public class PacketWriter : IWriter
             Buf[2] = (byte)((_pos - 4) >>> 16);
             Buf[3] = _sequence.incrementAndGet();
             CheckMaxAllowedLength(_pos - 4);
-            _out.Send(Buf, 0, _pos, 0);
+            await _out.WriteAsync(Buf, 0, _pos, _cancellationToken);
             // if (commandEnd) _out.Flush();
             _cmdLength += _pos - 4;
 

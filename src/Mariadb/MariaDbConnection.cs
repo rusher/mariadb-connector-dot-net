@@ -8,21 +8,21 @@ namespace Mariadb;
 
 public sealed class MariaDbConnection : DbConnection
 {
+    internal readonly SemaphoreSlim Lock = new(1);
     private Configuration _conf;
     private string _connectionString;
+    private ConnectionState _state;
 
     public bool CanUseServerTimeout;
     internal IClient Client;
 
     public MariaDbConnection(string? connectionString)
     {
-        State = ConnectionState.Closed;
+        _state = ConnectionState.Closed;
         ConnectionString = connectionString ?? "";
-        Lock = new object();
         Client = null;
     }
 
-    internal object Lock { get; }
     internal ExceptionFactory ExceptionFactory { get; set; }
 
     public override string ConnectionString
@@ -43,7 +43,9 @@ public sealed class MariaDbConnection : DbConnection
     }
 
     public override string Database { get; }
-    public override ConnectionState State { get; }
+
+    public override ConnectionState State => _state;
+
     public override string DataSource { get; }
     public override string ServerVersion { get; }
 
@@ -57,17 +59,60 @@ public sealed class MariaDbConnection : DbConnection
         throw new NotImplementedException();
     }
 
+    protected override void Dispose(bool disposing)
+    {
+        try
+        {
+            if (disposing)
+                Close();
+        }
+        finally
+        {
+            base.Dispose(disposing);
+        }
+    }
+
     public override void Close()
     {
-        throw new NotImplementedException();
+        CloseAsync().GetAwaiter().GetResult();
+    }
+
+    public override async Task CloseAsync()
+    {
+        switch (State)
+        {
+            case ConnectionState.Connecting:
+            case ConnectionState.Open:
+            case ConnectionState.Executing:
+            case ConnectionState.Fetching:
+                await Client.CloseAsync();
+                _state = ConnectionState.Closed;
+                break;
+        }
     }
 
     public override void Open()
     {
+        OpenAsync(CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    public override async Task OpenAsync(CancellationToken cancellationToken)
+    {
         if (State != ConnectionState.Closed)
             throw new InvalidOperationException($"Cannot Open: State is {State}.");
-        Client = StandardClient.BuildClient(_conf, Lock, HostAddress.From(_conf.Server, _conf.Port, true), false);
-        ExceptionFactory = Client.ExceptionFactory.SetConnection(this);
+        Lock.WaitAsync();
+        try
+        {
+            _state = ConnectionState.Connecting;
+            Client = await StandardClient.BuildClient(cancellationToken, _conf, Lock,
+                HostAddress.From(_conf.Server, _conf.Port, true), false);
+            ExceptionFactory = Client.ExceptionFactory.SetConnection(this);
+            _state = ConnectionState.Open;
+        }
+        finally
+        {
+            Lock.Release();
+        }
     }
 
     protected override MariaDbCommand CreateDbCommand()
